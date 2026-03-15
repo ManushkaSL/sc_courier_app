@@ -26,6 +26,14 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>SC Courier needs your location to track deliveries.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>SC Courier needs background location access to track deliveries when the app is minimised.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Allow camera access to capture NIC photos for registration.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Allow photo library access to select NIC photos for registration.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
