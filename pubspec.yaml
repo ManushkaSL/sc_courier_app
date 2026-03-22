@@ -64,7 +64,7 @@ flutter:
   assets:
     - assets/logo.png
     - assets/w.png
-    - assets/logo animation.mp4
+    - assets/logo_animation.mp4
     - assets/Courier.json
     - 'assets/Package Delivery.json'
 

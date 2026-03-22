@@ -4,6 +4,7 @@ import 'screens/login_screen.dart';
 import 'screens/register_screen.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/settings_screen.dart';
+import 'screens/extend_delivery_screen.dart';
 
 void main() {
   runApp(const MyApp());
@@ -139,6 +140,8 @@ class MyApp extends StatelessWidget {
         RegisterScreen.routeName: (context) => const RegisterScreen(),
         DashboardScreen.routeName: (context) => const DashboardScreen(),
         SettingsScreen.routeName: (context) => const SettingsScreen(),
+        ExtendDeliveryScreen.routeName: (context) =>
+            const ExtendDeliveryScreen(),
       },
     );
   }

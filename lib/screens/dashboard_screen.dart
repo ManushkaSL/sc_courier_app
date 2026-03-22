@@ -2,6 +2,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'login_screen.dart';
 import 'settings_screen.dart';
+import 'extend_delivery_screen.dart';
 import '../services/location_service.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -15,6 +16,8 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen> {
   final _locationService = LocationService();
+  final String riderName =
+      'John Doe'; // Delivery guy's name (can be fetched from backend)
 
   @override
   void initState() {
@@ -38,9 +41,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final position = _locationService.currentPosition;
     final gpsColor = isTracking ? const Color(0xFF4ADE80) : Colors.white38;
     final currentDeliveries = const [
-      ('PKG-1042', '10:30 AM', 'Colombo 03'),
-      ('PKG-1098', '11:15 AM', 'Nugegoda'),
-      ('PKG-1134', '12:00 PM', 'Maharagama'),
+      ('PKG-1042', 'Colombo 03'),
+      ('PKG-1098', 'Nugegoda'),
+      ('PKG-1134', 'Maharagama'),
     ];
 
     return Scaffold(
@@ -137,20 +140,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             ),
                           ),
                           const SizedBox(width: 16),
-                          const Expanded(
+                          Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  'Welcome back!',
-                                  style: TextStyle(
+                                  riderName,
+                                  style: const TextStyle(
                                     color: Colors.white,
                                     fontSize: 20,
                                     fontWeight: FontWeight.w800,
                                   ),
                                 ),
-                                SizedBox(height: 4),
-                                Text(
+                                const SizedBox(height: 4),
+                                const Text(
                                   'Ready for deliveries?',
                                   style: TextStyle(
                                     color: Color(0xFFAAAAAA),
@@ -362,9 +365,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   color: Colors.white,
                                   fontSize: 13,
                                 ),
+                                columnSpacing: 20,
                                 columns: const [
                                   DataColumn(label: Text('Parcel')),
-                                  DataColumn(label: Text('Time')),
                                   DataColumn(label: Text('Location')),
                                 ],
                                 rows: currentDeliveries
@@ -373,7 +376,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                         cells: [
                                           DataCell(Text(delivery.$1)),
                                           DataCell(Text(delivery.$2)),
-                                          DataCell(Text(delivery.$3)),
                                         ],
                                       ),
                                     )
@@ -381,7 +383,82 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               ),
                             ),
                           ),
-                          const SizedBox(height: 8),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 18),
+                // Extend Delivery Button
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(20),
+                  child: BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF97316).withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: const Color(
+                            0xFFF97316,
+                          ).withValues(alpha: 0.25),
+                        ),
+                      ),
+                      padding: const EdgeInsets.all(20),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  color: const Color(
+                                    0xFFF97316,
+                                  ).withValues(alpha: 0.15),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(
+                                  Icons.add_location_alt_outlined,
+                                  color: Color(0xFFF97316),
+                                  size: 20,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              const Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Add New Delivery',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                    SizedBox(height: 2),
+                                    Text(
+                                      'Extend your delivery list',
+                                      style: TextStyle(
+                                        color: Color(0xFFAAAAAA),
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 14),
+                          ElevatedButton.icon(
+                            onPressed: () => Navigator.pushNamed(
+                              context,
+                              ExtendDeliveryScreen.routeName,
+                            ),
+                            icon: const Icon(Icons.add),
+                            label: const Text('Extend Delivery'),
+                          ),
                         ],
                       ),
                     ),

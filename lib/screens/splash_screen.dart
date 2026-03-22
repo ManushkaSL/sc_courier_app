@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
+import 'dart:developer' as developer;
 import 'login_screen.dart';
 
 class SplashScreen extends StatefulWidget {
@@ -18,8 +19,15 @@ class _SplashScreenState extends State<SplashScreen> {
   @override
   void initState() {
     super.initState();
-    _videoController = VideoPlayerController.asset('assets/logo animation.mp4');
+    _videoController = VideoPlayerController.asset('assets/logo_animation.mp4');
     _initializeVideo();
+    // Fallback timeout - navigate to login after 10 seconds if video fails
+    Future.delayed(const Duration(seconds: 10), () {
+      if (mounted && !_hasNavigated) {
+        developer.log('Video initialization timeout - navigating to login');
+        _goToLogin();
+      }
+    });
   }
 
   Future<void> _initializeVideo() async {
@@ -31,8 +39,13 @@ class _SplashScreenState extends State<SplashScreen> {
       _videoController.addListener(_onVideoProgress);
       await _videoController.play();
 
-      if (mounted) setState(() {});
-    } catch (_) {
+      if (mounted) {
+        setState(() {
+          developer.log('Video initialized and playing successfully');
+        });
+      }
+    } catch (e) {
+      developer.log('Video initialization error: $e');
       _goToLogin();
     }
   }
@@ -71,19 +84,12 @@ class _SplashScreenState extends State<SplashScreen> {
             const SizedBox(height: 12),
             Expanded(
               child: Center(
-                child: _videoController.value.isInitialized
-                    ? AspectRatio(
-                        aspectRatio: _videoController.value.aspectRatio,
-                        child: VideoPlayer(_videoController),
-                      )
-                    : const SizedBox(
-                        width: 36,
-                        height: 36,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2.8,
-                          color: Colors.white54,
-                        ),
-                      ),
+                child: AspectRatio(
+                  aspectRatio: _videoController.value.isInitialized
+                      ? _videoController.value.aspectRatio
+                      : 16 / 9,
+                  child: VideoPlayer(_videoController),
+                ),
               ),
             ),
             Padding(
