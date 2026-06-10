@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import '../widgets/loading_overlay.dart';
 import '../widgets/premium_button.dart';
+import '../services/supabase_service.dart';
+import '../utils/validators.dart';
 import 'dashboard_screen.dart';
 
 class RegisterScreen extends StatefulWidget {
@@ -17,6 +19,7 @@ class RegisterScreen extends StatefulWidget {
 class _RegisterScreenState extends State<RegisterScreen> {
   bool _isLoading = false;
   final ImagePicker _imagePicker = ImagePicker();
+  final _supabaseService = SupabaseService();
 
   final _formKey = GlobalKey<FormState>();
   int _currentStep = 0;
@@ -57,13 +60,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
     _vehicleNumberController.dispose();
     _drivingLicenseController.dispose();
     super.dispose();
-  }
-
-  String? _requiredValidator(String? value) {
-    if (value == null || value.trim().isEmpty) {
-      return 'This field is required';
-    }
-    return null;
   }
 
   String? _getFileName(XFile? file) {
@@ -170,19 +166,64 @@ class _RegisterScreenState extends State<RegisterScreen> {
     }
   }
 
-  void _handleRegister() {
+  void _handleRegister() async {
     if (!_validateCurrentStep()) return;
     setState(() => _isLoading = true);
-    // TODO: replace with actual register logic
-    Future.delayed(const Duration(seconds: 2), () {
+
+    try {
+      // Sign up with Supabase
+      await _supabaseService.signUp(
+        email: _emailController.text.trim(),
+        password: _passwordController.text,
+      );
+
+      // Create user profile
+      final userId = _supabaseService.currentUser?.id;
+      if (userId != null) {
+        await _supabaseService.createUserProfile(
+          userId: userId,
+          fullName: _fullNameController.text.trim(),
+          email: _emailController.text.trim(),
+          phoneNumber: _phoneNumberController.text.trim(),
+          vehicleType: _vehicleType,
+          vehicleNumber: _vehicleNumberController.text.trim(),
+        );
+      }
+
       if (!mounted) return;
-      setState(() => _isLoading = false);
       Navigator.pushNamedAndRemoveUntil(
         context,
         DashboardScreen.routeName,
         (_) => false,
       );
-    });
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isLoading = false);
+        
+        String errorMessage = e.toString();
+        
+        // Provide user-friendly error messages
+        if (errorMessage.contains('rate limit')) {
+          errorMessage = 'Too many registration attempts. Please wait a few minutes and try again with a different email.';
+        } else if (errorMessage.contains('already registered') || errorMessage.contains('user already exists')) {
+          errorMessage = 'This email is already registered. Try logging in or use a different email.';
+        } else if (errorMessage.contains('invalid email')) {
+          errorMessage = 'Invalid email format. Please check your email address.';
+        } else if (errorMessage.contains('password')) {
+          errorMessage = 'Password must be at least 6 characters.';
+        } else {
+          errorMessage = 'Registration failed: $errorMessage';
+        }
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(errorMessage),
+            backgroundColor: Colors.redAccent,
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
+    }
   }
 
   @override
@@ -326,7 +367,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                       icon: Icons.person_outline,
                                       validator: (v) =>
                                           _isFieldInCurrentStep('Full Name')
-                                          ? _requiredValidator(v)
+                                          ? Validators.validateName(v)
                                           : null,
                                     ),
                                     const SizedBox(height: 12),
@@ -337,7 +378,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                       keyboardType: TextInputType.phone,
                                       validator: (v) =>
                                           _isFieldInCurrentStep('Phone Number')
-                                          ? _requiredValidator(v)
+                                          ? Validators.validatePhoneNumber(v)
                                           : null,
                                     ),
                                     const SizedBox(height: 12),
@@ -347,7 +388,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                       icon: Icons.store_outlined,
                                       validator: (v) =>
                                           _isFieldInCurrentStep('Branch')
-                                          ? _requiredValidator(v)
+                                          ? Validators.validateRequired(
+                                              v,
+                                              'Branch',
+                                            )
                                           : null,
                                     ),
                                     const SizedBox(height: 12),
@@ -358,7 +402,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                       keyboardType: TextInputType.emailAddress,
                                       validator: (v) =>
                                           _isFieldInCurrentStep('Email')
-                                          ? _requiredValidator(v)
+                                          ? Validators.validateEmail(v)
                                           : null,
                                     ),
                                     const SizedBox(height: 12),
@@ -369,7 +413,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                       obscureText: true,
                                       validator: (v) =>
                                           _isFieldInCurrentStep('Password')
-                                          ? _requiredValidator(v)
+                                          ? Validators.validatePassword(v)
                                           : null,
                                     ),
                                     const SizedBox(height: 12),
@@ -383,11 +427,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                           'Confirm Password',
                                         ))
                                           return null;
-                                        final err = _requiredValidator(v);
-                                        if (err != null) return err;
-                                        if (v != _passwordController.text)
-                                          return 'Passwords do not match';
-                                        return null;
+                                        return Validators.validatePasswordMatch(
+                                          v,
+                                          _passwordController.text,
+                                        );
                                       },
                                     ),
                                   ],
@@ -398,7 +441,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                       icon: Icons.credit_card_outlined,
                                       validator: (v) =>
                                           _isFieldInCurrentStep('NIC Number')
-                                          ? _requiredValidator(v)
+                                          ? Validators.validateNIC(v)
                                           : null,
                                     ),
                                     const SizedBox(height: 16),
@@ -441,7 +484,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                       maxLines: 3,
                                       validator: (v) =>
                                           _isFieldInCurrentStep('Home Address')
-                                          ? _requiredValidator(v)
+                                          ? Validators.validateRequired(
+                                              v,
+                                              'Home Address',
+                                            )
                                           : null,
                                     ),
                                     const SizedBox(height: 12),
@@ -454,7 +500,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                           _isFieldInCurrentStep(
                                             'Emergency Contact',
                                           )
-                                          ? _requiredValidator(v)
+                                          ? Validators.validatePhoneNumber(v)
                                           : null,
                                     ),
                                   ],
@@ -536,7 +582,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                           _isFieldInCurrentStep(
                                             'Vehicle Number',
                                           )
-                                          ? _requiredValidator(v)
+                                          ? Validators.validateVehicleNumber(v)
                                           : null,
                                     ),
                                     const SizedBox(height: 12),
@@ -548,7 +594,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                           _isFieldInCurrentStep(
                                             'Driving License Number',
                                           )
-                                          ? _requiredValidator(v)
+                                          ? Validators.validateRequired(
+                                              v,
+                                              'Driving License Number',
+                                            )
                                           : null,
                                     ),
                                   ],

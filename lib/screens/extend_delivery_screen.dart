@@ -1,5 +1,6 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import '../services/supabase_service.dart';
 
 class ExtendDeliveryScreen extends StatefulWidget {
   const ExtendDeliveryScreen({super.key});
@@ -15,6 +16,7 @@ class _ExtendDeliveryScreenState extends State<ExtendDeliveryScreen> {
   final _receiverNameController = TextEditingController();
   final _locationController = TextEditingController();
   final _distanceController = TextEditingController();
+  final _supabaseService = SupabaseService();
 
   final double pricePerKm = 50.0; // Fixed price per km
   double totalPrice = 0.0;
@@ -93,13 +95,38 @@ class _ExtendDeliveryScreenState extends State<ExtendDeliveryScreen> {
           ElevatedButton(
             onPressed: () {
               Navigator.pop(context);
-              _showSuccessDialog();
+              _submitToSupabase();
             },
             child: const Text('Submit'),
           ),
         ],
       ),
     );
+  }
+
+  Future<void> _submitToSupabase() async {
+    try {
+      await _supabaseService.createDelivery(
+        pickupAddress: _senderNameController.text,
+        deliveryAddress: _locationController.text,
+        distance: double.parse(_distanceController.text),
+        price: totalPrice,
+        packageDescription: 'Delivery package',
+        recipientName: _receiverNameController.text,
+      );
+
+      if (!mounted) return;
+      _showSuccessDialog();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error submitting delivery: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    }
   }
 
   void _showSuccessDialog() {
@@ -117,7 +144,7 @@ class _ExtendDeliveryScreenState extends State<ExtendDeliveryScreen> {
           style: TextStyle(color: Colors.white),
         ),
         content: const Text(
-          'Your delivery has been successfully submitted for approval and will be added to your active deliveries soon.',
+          'Your delivery has been successfully submitted and added to your active deliveries.',
           textAlign: TextAlign.center,
           style: TextStyle(color: Colors.white70),
         ),

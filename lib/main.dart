@@ -5,8 +5,13 @@ import 'screens/register_screen.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/extend_delivery_screen.dart';
+import 'services/supabase_service.dart';
+import 'services/push_notification_service.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await SupabaseService().initialize();
+  await PushNotificationService().initialize();
   runApp(const MyApp());
 }
 

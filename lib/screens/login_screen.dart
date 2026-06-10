@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:lottie/lottie.dart';
 import '../widgets/loading_overlay.dart';
 import '../widgets/premium_button.dart';
+import '../services/supabase_service.dart';
+import '../utils/validators.dart';
 import 'register_screen.dart';
 import 'dashboard_screen.dart';
 
@@ -17,19 +19,59 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   bool _isLoading = false;
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+  final _supabaseService = SupabaseService();
+  final _formKey = GlobalKey<FormState>();
+  String? _errorMessage;
 
-  void _handleLogin() {
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  void _handleLogin() async {
+    // Clear previous error
+    setState(() => _errorMessage = null);
+
+    // Validate form
+    if (!_formKey.currentState!.validate()) {
+      return;
+    }
+
     setState(() => _isLoading = true);
-    // TODO: replace with actual login logic
-    Future.delayed(const Duration(seconds: 2), () {
+
+    try {
+      await _supabaseService.signIn(
+        email: _emailController.text.trim(),
+        password: _passwordController.text,
+      );
+
       if (!mounted) return;
-      setState(() => _isLoading = false);
       Navigator.pushNamedAndRemoveUntil(
         context,
         DashboardScreen.routeName,
         (_) => false,
       );
-    });
+    } catch (e) {
+      String errorMessage = e.toString().replaceAll('Exception: ', '');
+      
+      // Provide user-friendly error messages
+      if (errorMessage.contains('rate limit')) {
+        errorMessage = 'Too many login attempts. Please wait a few minutes and try again.';
+      } else if (errorMessage.contains('Invalid login credentials') || errorMessage.contains('invalid credentials')) {
+        errorMessage = 'Invalid email or password. Please try again.';
+      } else if (errorMessage.contains('Email not confirmed')) {
+        errorMessage = 'Please confirm your email before logging in.';
+      }
+
+      setState(() {
+        _errorMessage = errorMessage;
+        _isLoading = false;
+      });
+    }
   }
 
   @override
@@ -103,68 +145,99 @@ class _LoginScreenState extends State<LoginScreen> {
                           horizontal: 22,
                           vertical: 28,
                         ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            const Text(
-                              'Welcome Back',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 24,
-                                fontWeight: FontWeight.w800,
-                                letterSpacing: 0.3,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              'Sign in to continue',
-                              style: TextStyle(
-                                color: Colors.white.withOpacity(0.5),
-                                fontSize: 14,
-                              ),
-                            ),
-                            const SizedBox(height: 24),
-                            TextField(
-                              style: const TextStyle(color: Colors.white),
-                              decoration: const InputDecoration(
-                                labelText: 'Email',
-                                prefixIcon: Icon(
-                                  Icons.email_outlined,
-                                  color: Color(0xFFF97316),
-                                  size: 20,
+                        child: Form(
+                          key: _formKey,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              const Text(
+                                'Welcome Back',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 24,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: 0.3,
                                 ),
                               ),
-                            ),
-                            const SizedBox(height: 14),
-                            TextField(
-                              obscureText: true,
-                              style: const TextStyle(color: Colors.white),
-                              decoration: const InputDecoration(
-                                labelText: 'Password',
-                                prefixIcon: Icon(
-                                  Icons.lock_outline,
-                                  color: Color(0xFFF97316),
-                                  size: 20,
+                              const SizedBox(height: 4),
+                              Text(
+                                'Sign in to continue',
+                                style: TextStyle(
+                                  color: Colors.white.withOpacity(0.5),
+                                  fontSize: 14,
                                 ),
                               ),
-                            ),
-                            const SizedBox(height: 8),
-                            Align(
-                              alignment: Alignment.centerRight,
-                              child: TextButton(
-                                onPressed: () {},
-                                child: const Text(
-                                  'Forgot password?',
-                                  style: TextStyle(fontSize: 13),
+                              if (_errorMessage != null)
+                                Padding(
+                                  padding: const EdgeInsets.only(
+                                    top: 16,
+                                    bottom: 8,
+                                  ),
+                                  child: Container(
+                                    padding: const EdgeInsets.all(12),
+                                    decoration: BoxDecoration(
+                                      color: Colors.red.withOpacity(0.2),
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(
+                                        color: Colors.red.withOpacity(0.4),
+                                      ),
+                                    ),
+                                    child: Text(
+                                      _errorMessage!,
+                                      style: const TextStyle(
+                                        color: Colors.redAccent,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              const SizedBox(height: 24),
+                              TextFormField(
+                                controller: _emailController,
+                                style: const TextStyle(color: Colors.white),
+                                validator: Validators.validateEmail,
+                                decoration: const InputDecoration(
+                                  labelText: 'Email',
+                                  prefixIcon: Icon(
+                                    Icons.email_outlined,
+                                    color: Color(0xFFF97316),
+                                    size: 20,
+                                  ),
                                 ),
                               ),
-                            ),
-                            const SizedBox(height: 8),
-                            PremiumButton(
-                              label: 'Login',
-                              onPressed: _handleLogin,
-                            ),
-                          ],
+                              const SizedBox(height: 14),
+                              TextFormField(
+                                controller: _passwordController,
+                                obscureText: true,
+                                style: const TextStyle(color: Colors.white),
+                                validator: Validators.validatePassword,
+                                decoration: const InputDecoration(
+                                  labelText: 'Password',
+                                  prefixIcon: Icon(
+                                    Icons.lock_outline,
+                                    color: Color(0xFFF97316),
+                                    size: 20,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: TextButton(
+                                  onPressed: () {},
+                                  child: const Text(
+                                    'Forgot password?',
+                                    style: TextStyle(fontSize: 13),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              PremiumButton(
+                                label: 'Login',
+                                onPressed: _handleLogin,
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ),
