@@ -4,7 +4,9 @@ import 'login_screen.dart';
 import 'settings_screen.dart';
 import 'extend_delivery_screen.dart';
 import '../services/location_service.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../services/supabase_service.dart';
+import '../services/firestore_service.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -38,8 +40,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Future<void> _loadData() async {
     try {
-      final currentUser = _supabaseService.currentUser;
-      if (currentUser == null) {
+      final firebaseUser = FirebaseAuth.instance.currentUser;
+      if (firebaseUser == null) {
         Navigator.pushNamedAndRemoveUntil(
           context,
           LoginScreen.routeName,
@@ -49,16 +51,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
       }
 
       // Fetch user profile
-      final profile = await _supabaseService.getUserProfile(currentUser.id);
+      final profile = await FirestoreService().getRiderByUid(firebaseUser.uid);
       if (profile != null) {
-        riderName = profile['full_name'] ?? 'Rider';
+        riderName = profile['Name'] ?? 'Rider';
       }
 
       // Fetch deliveries
       final deliveries = await _supabaseService.getDeliveries();
 
       // Fetch stats
-      final stats = await _supabaseService.getRiderStats(currentUser.id);
+      final stats = await _supabaseService.getRiderStats(firebaseUser.uid);
 
       if (mounted) {
         setState(() {
@@ -125,7 +127,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
             icon: const Icon(Icons.logout, color: Color(0xFFF97316)),
             tooltip: 'Logout',
             onPressed: () async {
-              await _supabaseService.signOut();
+              if (_locationService.isTracking) {
+                await _locationService.stopTracking();
+              }
+              await FirebaseAuth.instance.signOut();
               if (mounted) {
                 Navigator.pushNamedAndRemoveUntil(
                   context,

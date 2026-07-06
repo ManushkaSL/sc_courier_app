@@ -1,6 +1,10 @@
 import 'dart:async';
+
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
+
+import 'firestore_service.dart';
 
 class LocationService extends ChangeNotifier {
   // Singleton
@@ -12,6 +16,7 @@ class LocationService extends ChangeNotifier {
   Position? _currentPosition;
   String _statusMessage = 'GPS tracking is off';
   StreamSubscription<Position>? _positionStream;
+  String? _trackingRiderId;
 
   bool get isTracking => _isTracking;
   Position? get currentPosition => _currentPosition;
@@ -39,6 +44,13 @@ class LocationService extends ChangeNotifier {
 
   /// Starts GPS tracking. Returns an error message on failure, null on success.
   Future<String?> startTracking() async {
+    final riderId = FirebaseAuth.instance.currentUser?.uid;
+    if (riderId == null) {
+      _statusMessage = 'Sign in before starting GPS tracking.';
+      notifyListeners();
+      return _statusMessage;
+    }
+
     final error = await _ensurePermission();
     if (error != null) {
       _statusMessage = error;
@@ -47,7 +59,8 @@ class LocationService extends ChangeNotifier {
     }
 
     _isTracking = true;
-    _statusMessage = 'Getting location…';
+    _trackingRiderId = riderId;
+    _statusMessage = 'Getting location...';
     notifyListeners();
 
     const settings = LocationSettings(
@@ -57,12 +70,13 @@ class LocationService extends ChangeNotifier {
 
     _positionStream = Geolocator.getPositionStream(locationSettings: settings)
         .listen(
-          (position) {
+          (position) async {
             _currentPosition = position;
             _statusMessage =
                 '${position.latitude.toStringAsFixed(5)}, '
                 '${position.longitude.toStringAsFixed(5)}';
             notifyListeners();
+            await _publishPosition(position);
           },
           onError: (e) {
             _isTracking = false;
@@ -75,12 +89,42 @@ class LocationService extends ChangeNotifier {
   }
 
   Future<void> stopTracking() async {
+    final riderId = _trackingRiderId ?? FirebaseAuth.instance.currentUser?.uid;
     await _positionStream?.cancel();
     _positionStream = null;
     _isTracking = false;
+    _trackingRiderId = null;
     _currentPosition = null;
     _statusMessage = 'GPS tracking is off';
     notifyListeners();
+
+    if (riderId != null) {
+      try {
+        await FirestoreService().markRiderLocationOffline(riderId);
+      } catch (e) {
+        _statusMessage = 'GPS tracking is off. Offline sync failed: $e';
+        notifyListeners();
+      }
+    }
+  }
+
+  Future<void> _publishPosition(Position position) async {
+    final riderId = _trackingRiderId;
+    if (riderId == null) return;
+
+    try {
+      await FirestoreService().updateRiderLiveLocation(
+        riderId: riderId,
+        latitude: position.latitude,
+        longitude: position.longitude,
+        accuracy: position.accuracy,
+        speed: position.speed,
+        heading: position.heading,
+      );
+    } catch (e) {
+      _statusMessage = 'Location saved locally. Sync failed: $e';
+      notifyListeners();
+    }
   }
 
   /// Opens the device app-settings page for manual permission grant.

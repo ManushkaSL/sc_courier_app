@@ -1,10 +1,15 @@
+import 'dart:async';
 import 'dart:ui';
+
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
-import '../widgets/loading_overlay.dart';
-import '../widgets/premium_button.dart';
+
+import '../services/firestore_service.dart';
 import '../services/supabase_service.dart';
 import '../utils/validators.dart';
+import '../widgets/loading_overlay.dart';
+import '../widgets/premium_button.dart';
 import 'dashboard_screen.dart';
 
 class RegisterScreen extends StatefulWidget {
@@ -18,7 +23,6 @@ class RegisterScreen extends StatefulWidget {
 
 class _RegisterScreenState extends State<RegisterScreen> {
   bool _isLoading = false;
-  final ImagePicker _imagePicker = ImagePicker();
   final _supabaseService = SupabaseService();
 
   final _formKey = GlobalKey<FormState>();
@@ -43,8 +47,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
       TextEditingController();
 
   String? _vehicleType;
-  XFile? _nicFrontImage;
-  XFile? _nicBackImage;
 
   @override
   void dispose() {
@@ -62,69 +64,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
     super.dispose();
   }
 
-  String? _getFileName(XFile? file) {
-    if (file == null) return null;
-    final normalized = file.path.replaceAll('\\', '/');
-    return normalized.split('/').last;
-  }
-
-  Future<void> _pickNicPhoto({required bool isFront}) async {
-    final source = await showModalBottomSheet<ImageSource>(
-      context: context,
-      builder: (context) {
-        return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                leading: const Icon(Icons.photo_library),
-                title: const Text('Choose from gallery'),
-                onTap: () => Navigator.pop(context, ImageSource.gallery),
-              ),
-              ListTile(
-                leading: const Icon(Icons.camera_alt),
-                title: const Text('Take a photo'),
-                onTap: () => Navigator.pop(context, ImageSource.camera),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-
-    if (source == null) return;
-
-    final pickedImage = await _imagePicker.pickImage(
-      source: source,
-      imageQuality: 80,
-    );
-
-    if (pickedImage == null || !mounted) return;
-
-    setState(() {
-      if (isFront) {
-        _nicFrontImage = pickedImage;
-      } else {
-        _nicBackImage = pickedImage;
-      }
-    });
-  }
-
   bool _validateCurrentStep() {
     final formState = _formKey.currentState;
     if (formState == null) return false;
     if (!formState.validate()) return false;
-
-    if (_currentStep == 1) {
-      if (_nicFrontImage == null || _nicBackImage == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Please upload both NIC front and back photos.'),
-          ),
-        );
-        return false;
-      }
-    }
 
     if (_currentStep == 2 && _vehicleType == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -168,27 +111,50 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   void _handleRegister() async {
     if (!_validateCurrentStep()) return;
+    if (_isLoading) return;
     setState(() => _isLoading = true);
 
-    try {
-      // Sign up with Supabase
-      await _supabaseService.signUp(
-        email: _emailController.text.trim(),
-        password: _passwordController.text,
-      );
+    User? createdUser;
 
-      // Create user profile
-      final userId = _supabaseService.currentUser?.id;
-      if (userId != null) {
-        await _supabaseService.createUserProfile(
-          userId: userId,
-          fullName: _fullNameController.text.trim(),
-          email: _emailController.text.trim(),
-          phoneNumber: _phoneNumberController.text.trim(),
-          vehicleType: _vehicleType,
-          vehicleNumber: _vehicleNumberController.text.trim(),
-        );
+    try {
+      // Create Firebase auth user
+      final cred = await FirebaseAuth.instance
+          .createUserWithEmailAndPassword(
+            email: _emailController.text.trim(),
+            password: _passwordController.text,
+          )
+          .timeout(const Duration(seconds: 30));
+
+      // NIC image upload is temporarily disabled — save profile without images.
+      final userId = cred.user?.uid;
+      if (userId == null) {
+        throw Exception('Could not create Firebase user.');
       }
+      createdUser = cred.user;
+
+      final nic = _nicNumberController.text.trim();
+      final frontUrl = null;
+      final backUrl = null;
+
+      final riderPayload = {
+        'NIC': nic,
+        'Name': _fullNameController.text.trim(),
+        'Phone_Number': _phoneNumberController.text.trim(),
+        'Branch': _branchController.text.trim(),
+        'Email': _emailController.text.trim(),
+        'NIC_Front_Image': frontUrl,
+        'NIC_Back_Image': backUrl,
+        'Address': _homeAddressController.text.trim(),
+        'Emergency_Contact': _emergencyContactController.text.trim(),
+        'Vehicle_Type': _vehicleType,
+        'Vehicle_No': _vehicleNumberController.text.trim(),
+        'Driver_Licence_No': _drivingLicenseController.text.trim(),
+        'firebase_uid': userId,
+        'created_at': FieldValue.serverTimestamp(),
+        'created_at_iso': DateTime.now().toIso8601String(),
+      };
+
+      await FirestoreService().saveRider(riderPayload);
 
       if (!mounted) return;
       Navigator.pushNamedAndRemoveUntil(
@@ -197,24 +163,18 @@ class _RegisterScreenState extends State<RegisterScreen> {
         (_) => false,
       );
     } catch (e) {
+      final authUser = FirebaseAuth.instance.currentUser;
+      if (createdUser != null && authUser?.uid == createdUser.uid) {
+        try {
+          await authUser?.delete();
+        } catch (_) {}
+      }
+
       if (mounted) {
         setState(() => _isLoading = false);
-        
-        String errorMessage = e.toString();
-        
-        // Provide user-friendly error messages
-        if (errorMessage.contains('rate limit')) {
-          errorMessage = 'Too many registration attempts. Please wait a few minutes and try again with a different email.';
-        } else if (errorMessage.contains('already registered') || errorMessage.contains('user already exists')) {
-          errorMessage = 'This email is already registered. Try logging in or use a different email.';
-        } else if (errorMessage.contains('invalid email')) {
-          errorMessage = 'Invalid email format. Please check your email address.';
-        } else if (errorMessage.contains('password')) {
-          errorMessage = 'Password must be at least 6 characters.';
-        } else {
-          errorMessage = 'Registration failed: $errorMessage';
-        }
-        
+
+        final errorMessage = _registrationErrorMessage(e);
+
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(errorMessage),
@@ -224,6 +184,41 @@ class _RegisterScreenState extends State<RegisterScreen> {
         );
       }
     }
+  }
+
+  String _registrationErrorMessage(Object error) {
+    if (error is TimeoutException || error.toString().contains('timed out')) {
+      return 'Registration is taking too long. Please try again or check Firebase rules.';
+    }
+
+    if (error is FirebaseAuthException) {
+      switch (error.code) {
+        case 'email-already-in-use':
+          return 'This email is already registered. Try logging in or use a different email.';
+        case 'invalid-email':
+          return 'Invalid email format. Please check your email address.';
+        case 'weak-password':
+          return 'Password must be at least 6 characters.';
+        case 'too-many-requests':
+          return 'Too many registration attempts. Please wait a few minutes and try again.';
+      }
+    }
+
+    if (error is FirebaseException) {
+      if (error.code == 'permission-denied' || error.code == 'unauthorized') {
+        return 'Firebase permission denied. Deploy updated Firestore/Storage rules then try again.';
+      }
+      return 'Firebase error (${error.code}): ${error.message ?? error.toString()}';
+    }
+
+    final rawMessage = error.toString();
+    if (rawMessage.contains('permission-denied') ||
+        rawMessage.contains('unauthorized') ||
+        rawMessage.contains('403')) {
+      return 'Firebase permission denied. Deploy updated Firestore/Storage rules then try again.';
+    }
+
+    return 'Registration failed: $rawMessage';
   }
 
   @override
@@ -445,37 +440,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                           : null,
                                     ),
                                     const SizedBox(height: 16),
-                                    Text(
-                                      'Upload NIC Photo',
-                                      style: TextStyle(
-                                        color: Colors.white.withOpacity(0.7),
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 8),
-                                    Row(
-                                      children: [
-                                        Expanded(
-                                          child: _glassUploadButton(
-                                            label: 'Front',
-                                            file: _nicFrontImage,
-                                            onTap: () =>
-                                                _pickNicPhoto(isFront: true),
-                                          ),
-                                        ),
-                                        const SizedBox(width: 10),
-                                        Expanded(
-                                          child: _glassUploadButton(
-                                            label: 'Back',
-                                            file: _nicBackImage,
-                                            onTap: () =>
-                                                _pickNicPhoto(isFront: false),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 12),
                                     _glassField(
                                       controller: _homeAddressController,
                                       label: 'Home Address',
@@ -669,51 +633,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
         prefixIcon: Icon(icon, color: const Color(0xFFF97316), size: 20),
       ),
       validator: validator,
-    );
-  }
-
-  Widget _glassUploadButton({
-    required String label,
-    required XFile? file,
-    required VoidCallback onTap,
-  }) {
-    final picked = file != null;
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
-        decoration: BoxDecoration(
-          color: picked
-              ? const Color(0xFFF97316).withOpacity(0.12)
-              : Colors.white.withOpacity(0.06),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: picked
-                ? const Color(0xFFF97316).withOpacity(0.6)
-                : Colors.white.withOpacity(0.15),
-          ),
-        ),
-        child: Column(
-          children: [
-            Icon(
-              picked ? Icons.check_circle_outline : Icons.upload_file,
-              color: picked ? const Color(0xFFF97316) : Colors.white54,
-              size: 22,
-            ),
-            const SizedBox(height: 4),
-            Text(
-              picked ? (_getFileName(file) ?? label) : 'Upload $label',
-              textAlign: TextAlign.center,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: picked ? const Color(0xFFF97316) : Colors.white54,
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }

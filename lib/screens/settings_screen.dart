@@ -1,5 +1,6 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../services/location_service.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -14,6 +15,7 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen>
     with SingleTickerProviderStateMixin {
   final _locationService = LocationService();
+  GoogleMapController? _mapController;
   late final AnimationController _pulseCtrl;
 
   @override
@@ -29,12 +31,20 @@ class _SettingsScreenState extends State<SettingsScreen>
   @override
   void dispose() {
     _locationService.removeListener(_onLocationChanged);
+    _mapController?.dispose();
     _pulseCtrl.dispose();
     super.dispose();
   }
 
   void _onLocationChanged() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    final position = _locationService.currentPosition;
+    setState(() {});
+    if (position != null) {
+      _mapController?.animateCamera(
+        CameraUpdate.newLatLng(LatLng(position.latitude, position.longitude)),
+      );
+    }
   }
 
   Future<void> _toggleTracking() async {
@@ -60,6 +70,9 @@ class _SettingsScreenState extends State<SettingsScreen>
   Widget build(BuildContext context) {
     final isTracking = _locationService.isTracking;
     final position = _locationService.currentPosition;
+    final riderLatLng = position == null
+        ? null
+        : LatLng(position.latitude, position.longitude);
     final statusMsg = _locationService.statusMessage;
 
     final trackingColor = isTracking ? const Color(0xFF4ADE80) : Colors.white38;
@@ -280,6 +293,19 @@ class _SettingsScreenState extends State<SettingsScreen>
                             ),
                           ),
                           const SizedBox(height: 16),
+                          _RiderLocationMap(
+                            riderLatLng: riderLatLng,
+                            isTracking: isTracking,
+                            onMapCreated: (controller) {
+                              _mapController = controller;
+                              if (riderLatLng != null) {
+                                controller.animateCamera(
+                                  CameraUpdate.newLatLngZoom(riderLatLng, 16),
+                                );
+                              }
+                            },
+                          ),
+                          const SizedBox(height: 16),
                           // Big action button
                           _GpsActionButton(
                             isTracking: isTracking,
@@ -338,6 +364,76 @@ class _SettingsScreenState extends State<SettingsScreen>
 }
 
 // ─── Helper widgets ───────────────────────────────────────────────────────────
+
+class _RiderLocationMap extends StatelessWidget {
+  final LatLng? riderLatLng;
+  final bool isTracking;
+  final ValueChanged<GoogleMapController> onMapCreated;
+
+  const _RiderLocationMap({
+    required this.riderLatLng,
+    required this.isTracking,
+    required this.onMapCreated,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final currentLatLng = riderLatLng;
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: SizedBox(
+        height: 220,
+        child: currentLatLng == null
+            ? Container(
+                color: Colors.white.withValues(alpha: 0.05),
+                alignment: Alignment.center,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      isTracking ? Icons.location_searching : Icons.map,
+                      color: const Color(0xFFF97316),
+                      size: 34,
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      isTracking
+                          ? 'Waiting for rider location...'
+                          : 'Start GPS to show rider location',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.65),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            : GoogleMap(
+                initialCameraPosition: CameraPosition(
+                  target: currentLatLng,
+                  zoom: 16,
+                ),
+                markers: {
+                  Marker(
+                    markerId: const MarkerId('rider_current_location'),
+                    position: currentLatLng,
+                    infoWindow: const InfoWindow(title: 'Rider location'),
+                  ),
+                },
+                onMapCreated: onMapCreated,
+                myLocationEnabled: isTracking,
+                myLocationButtonEnabled: false,
+                zoomControlsEnabled: false,
+                mapToolbarEnabled: false,
+                compassEnabled: true,
+              ),
+      ),
+    );
+  }
+}
 
 class _InfoRow extends StatelessWidget {
   final IconData icon;

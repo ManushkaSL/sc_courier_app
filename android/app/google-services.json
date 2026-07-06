@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "562462742204",
+    "project_id": "sccourier-ed01b",
+    "storage_bucket": "sccourier-ed01b.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:562462742204:android:feca92e8faa82f725d22b9",
+        "android_client_info": {
+          "package_name": "com.example.sc_courier"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "562462742204-qll5hupbhuh4q4b2fautda3klead31ub.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCkZkuZKdqsEk15QgYOJYZ2oDrxyTkKAVE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "562462742204-qll5hupbhuh4q4b2fautda3klead31ub.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

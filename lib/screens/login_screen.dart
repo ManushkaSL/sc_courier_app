@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:lottie/lottie.dart';
 import '../widgets/loading_overlay.dart';
 import '../widgets/premium_button.dart';
-import '../services/supabase_service.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../utils/validators.dart';
 import 'register_screen.dart';
 import 'dashboard_screen.dart';
@@ -21,7 +21,7 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _isLoading = false;
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
-  final _supabaseService = SupabaseService();
+  // final _supabaseService = SupabaseService();
   final _formKey = GlobalKey<FormState>();
   String? _errorMessage;
 
@@ -44,7 +44,7 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = true);
 
     try {
-      await _supabaseService.signIn(
+      await FirebaseAuth.instance.signInWithEmailAndPassword(
         email: _emailController.text.trim(),
         password: _passwordController.text,
       );
@@ -57,11 +57,13 @@ class _LoginScreenState extends State<LoginScreen> {
       );
     } catch (e) {
       String errorMessage = e.toString().replaceAll('Exception: ', '');
-      
+
       // Provide user-friendly error messages
       if (errorMessage.contains('rate limit')) {
-        errorMessage = 'Too many login attempts. Please wait a few minutes and try again.';
-      } else if (errorMessage.contains('Invalid login credentials') || errorMessage.contains('invalid credentials')) {
+        errorMessage =
+            'Too many login attempts. Please wait a few minutes and try again.';
+      } else if (errorMessage.contains('Invalid login credentials') ||
+          errorMessage.contains('invalid credentials')) {
         errorMessage = 'Invalid email or password. Please try again.';
       } else if (errorMessage.contains('Email not confirmed')) {
         errorMessage = 'Please confirm your email before logging in.';
