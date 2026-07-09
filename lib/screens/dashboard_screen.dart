@@ -123,23 +123,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
             onPressed: () =>
                 Navigator.pushNamed(context, SettingsScreen.routeName),
           ),
-          IconButton(
-            icon: const Icon(Icons.logout, color: Color(0xFFF97316)),
-            tooltip: 'Logout',
-            onPressed: () async {
-              if (_locationService.isTracking) {
-                await _locationService.stopTracking();
-              }
-              await FirebaseAuth.instance.signOut();
-              if (mounted) {
-                Navigator.pushNamedAndRemoveUntil(
-                  context,
-                  LoginScreen.routeName,
-                  (_) => false,
-                );
-              }
-            },
-          ),
         ],
       ),
       body: Container(
@@ -425,14 +408,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                     children: [
                                       Icon(
                                         Icons.inbox_outlined,
-                                        color: Colors.white.withOpacity(0.3),
+                                        color: Colors.white.withValues(
+                                          alpha: 0.3,
+                                        ),
                                         size: 40,
                                       ),
                                       const SizedBox(height: 8),
                                       Text(
                                         'No active deliveries',
                                         style: TextStyle(
-                                          color: Colors.white.withOpacity(0.5),
+                                          color: Colors.white.withValues(
+                                            alpha: 0.5,
+                                          ),
                                         ),
                                       ),
                                     ],
@@ -499,7 +486,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                                                 : const Color(
                                                                     0xFFF97316,
                                                                   ))
-                                                            .withOpacity(0.2),
+                                                            .withValues(
+                                                              alpha: 0.2,
+                                                            ),
                                                     borderRadius:
                                                         BorderRadius.circular(
                                                           6,

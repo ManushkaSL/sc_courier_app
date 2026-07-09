@@ -6,6 +6,7 @@ import 'screens/login_screen.dart';
 import 'screens/register_screen.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/settings_screen.dart';
+import 'screens/profile_settings_screen.dart';
 import 'screens/extend_delivery_screen.dart';
 import 'services/supabase_service.dart';
 import 'services/push_notification_service.dart';
@@ -110,12 +111,12 @@ class MyApp extends StatelessWidget {
         ),
         inputDecorationTheme: InputDecorationTheme(
           filled: true,
-          fillColor: Colors.white.withOpacity(0.07),
+          fillColor: Colors.white.withValues(alpha: 0.07),
           labelStyle: const TextStyle(color: Color(0xFFBBBBBB)),
           hintStyle: const TextStyle(color: Color(0xFF888888)),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(16),
-            borderSide: BorderSide(color: Colors.white.withOpacity(0.15)),
+            borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.15)),
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(16),
@@ -211,6 +212,8 @@ class MyApp extends StatelessWidget {
         RegisterScreen.routeName: (context) => const RegisterScreen(),
         DashboardScreen.routeName: (context) => const DashboardScreen(),
         SettingsScreen.routeName: (context) => const SettingsScreen(),
+        ProfileSettingsScreen.routeName: (context) =>
+            const ProfileSettingsScreen(),
         ExtendDeliveryScreen.routeName: (context) =>
             const ExtendDeliveryScreen(),
       },

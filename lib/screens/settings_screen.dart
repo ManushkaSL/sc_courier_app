@@ -1,7 +1,13 @@
 import 'dart:ui';
+
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+
 import '../services/location_service.dart';
+import 'login_screen.dart';
+import 'profile_settings_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -66,6 +72,19 @@ class _SettingsScreenState extends State<SettingsScreen>
     }
   }
 
+  Future<void> _logout() async {
+    if (_locationService.isTracking) {
+      await _locationService.stopTracking();
+    }
+    await FirebaseAuth.instance.signOut();
+    if (!mounted) return;
+    Navigator.pushNamedAndRemoveUntil(
+      context,
+      LoginScreen.routeName,
+      (_) => false,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isTracking = _locationService.isTracking;
@@ -109,7 +128,22 @@ class _SettingsScreenState extends State<SettingsScreen>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // ─── GPS Tracking Card ───────────────────────────────────
+                const _SettingsSectionTitle('Account'),
+                _SettingsGroup(
+                  children: [
+                    _SettingsTile(
+                      icon: Icons.person_outline,
+                      label: 'Profile Settings',
+                      subtitle: 'Name, phone, photo, and vehicle details',
+                      onTap: () => Navigator.pushNamed(
+                        context,
+                        ProfileSettingsScreen.routeName,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 18),
+                const _SettingsSectionTitle('GPS Location Tracking'),
                 ClipRRect(
                   borderRadius: BorderRadius.circular(24),
                   child: BackdropFilter(
@@ -139,10 +173,8 @@ class _SettingsScreenState extends State<SettingsScreen>
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          // Header row
                           Row(
                             children: [
-                              // Animated pulse indicator
                               AnimatedBuilder(
                                 animation: _pulseCtrl,
                                 builder: (context, child) => Container(
@@ -198,7 +230,6 @@ class _SettingsScreenState extends State<SettingsScreen>
                                   ],
                                 ),
                               ),
-                              // Toggle switch
                               GestureDetector(
                                 onTap: _toggleTracking,
                                 child: AnimatedContainer(
@@ -237,7 +268,6 @@ class _SettingsScreenState extends State<SettingsScreen>
                             ],
                           ),
                           const SizedBox(height: 20),
-                          // Status / coordinates area
                           Container(
                             padding: const EdgeInsets.all(14),
                             decoration: BoxDecoration(
@@ -286,7 +316,7 @@ class _SettingsScreenState extends State<SettingsScreen>
                                         Icons.precision_manufacturing_outlined,
                                     label: 'Accuracy',
                                     value:
-                                        '±${position.accuracy.toStringAsFixed(1)} m',
+                                        '+/- ${position.accuracy.toStringAsFixed(1)} m',
                                   ),
                                 ],
                               ],
@@ -306,7 +336,6 @@ class _SettingsScreenState extends State<SettingsScreen>
                             },
                           ),
                           const SizedBox(height: 16),
-                          // Big action button
                           _GpsActionButton(
                             isTracking: isTracking,
                             onTap: _toggleTracking,
@@ -317,42 +346,36 @@ class _SettingsScreenState extends State<SettingsScreen>
                   ),
                 ),
                 const SizedBox(height: 18),
-                // ─── Device Settings shortcut ────────────────────────────
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(18),
-                  child: BackdropFilter(
-                    filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.05),
-                        borderRadius: BorderRadius.circular(18),
-                        border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.09),
-                        ),
-                      ),
-                      child: Column(
-                        children: [
-                          _SettingsTile(
-                            icon: Icons.settings_outlined,
-                            label: 'App Location Settings',
-                            subtitle: 'Manage location permission',
-                            onTap: _locationService.openAppSettings,
-                          ),
-                          Divider(
-                            height: 1,
-                            color: Colors.white.withValues(alpha: 0.07),
-                            indent: 58,
-                          ),
-                          _SettingsTile(
-                            icon: Icons.location_on_outlined,
-                            label: 'Device Location Settings',
-                            subtitle: 'Open device GPS settings',
-                            onTap: _locationService.openLocationSettings,
-                          ),
-                        ],
-                      ),
+                const _SettingsSectionTitle('App Settings'),
+                _SettingsGroup(
+                  children: [
+                    _SettingsTile(
+                      icon: Icons.settings_outlined,
+                      label: 'App Location Settings',
+                      subtitle: 'Manage location permission',
+                      onTap: _locationService.openAppSettings,
                     ),
-                  ),
+                    _SettingsDivider(),
+                    _SettingsTile(
+                      icon: Icons.location_on_outlined,
+                      label: 'Device Location Settings',
+                      subtitle: 'Open device GPS settings',
+                      onTap: _locationService.openLocationSettings,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 18),
+                const _SettingsSectionTitle('Account Access'),
+                _SettingsGroup(
+                  children: [
+                    _SettingsTile(
+                      icon: Icons.logout,
+                      label: 'Logout',
+                      subtitle: 'Sign out from this rider account',
+                      iconColor: Colors.redAccent,
+                      onTap: _logout,
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -363,7 +386,61 @@ class _SettingsScreenState extends State<SettingsScreen>
   }
 }
 
-// ─── Helper widgets ───────────────────────────────────────────────────────────
+class _SettingsSectionTitle extends StatelessWidget {
+  final String label;
+
+  const _SettingsSectionTitle(this.label);
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 2, bottom: 8),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: Colors.white.withValues(alpha: 0.58),
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+}
+
+class _SettingsGroup extends StatelessWidget {
+  final List<Widget> children;
+
+  const _SettingsGroup({required this.children});
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(18),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.05),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.09)),
+          ),
+          child: Column(children: children),
+        ),
+      ),
+    );
+  }
+}
+
+class _SettingsDivider extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Divider(
+      height: 1,
+      color: Colors.white.withValues(alpha: 0.07),
+      indent: 58,
+    );
+  }
+}
 
 class _RiderLocationMap extends StatelessWidget {
   final LatLng? riderLatLng;
@@ -379,12 +456,22 @@ class _RiderLocationMap extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final currentLatLng = riderLatLng;
+    final supportsEmbeddedMap =
+        !kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.android ||
+            defaultTargetPlatform == TargetPlatform.iOS);
+    final placeholderText = !supportsEmbeddedMap && currentLatLng != null
+        ? '${currentLatLng.latitude.toStringAsFixed(6)}, '
+              '${currentLatLng.longitude.toStringAsFixed(6)}'
+        : isTracking
+        ? 'Waiting for rider location...'
+        : 'Start GPS to show rider location';
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(14),
       child: SizedBox(
         height: 220,
-        child: currentLatLng == null
+        child: currentLatLng == null || !supportsEmbeddedMap
             ? Container(
                 color: Colors.white.withValues(alpha: 0.05),
                 alignment: Alignment.center,
@@ -398,9 +485,7 @@ class _RiderLocationMap extends StatelessWidget {
                     ),
                     const SizedBox(height: 10),
                     Text(
-                      isTracking
-                          ? 'Waiting for rider location...'
-                          : 'Start GPS to show rider location',
+                      placeholderText,
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         color: Colors.white.withValues(alpha: 0.65),
@@ -579,12 +664,14 @@ class _SettingsTile extends StatelessWidget {
   final IconData icon;
   final String label;
   final String subtitle;
+  final Color iconColor;
   final VoidCallback onTap;
 
   const _SettingsTile({
     required this.icon,
     required this.label,
     required this.subtitle,
+    this.iconColor = const Color(0xFFF97316),
     required this.onTap,
   });
 
@@ -600,10 +687,10 @@ class _SettingsTile extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: const Color(0xFFF97316).withValues(alpha: 0.12),
+                color: iconColor.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: Icon(icon, color: const Color(0xFFF97316), size: 20),
+              child: Icon(icon, color: iconColor, size: 20),
             ),
             const SizedBox(width: 14),
             Expanded(

@@ -60,6 +60,21 @@ class FirestoreService {
     return data;
   }
 
+  Future<void> updateRiderProfile({
+    required String riderId,
+    required Map<String, dynamic> data,
+  }) async {
+    await _db
+        .collection('riders')
+        .doc(riderId)
+        .set({
+          ...data,
+          'firebase_uid': riderId,
+          'updated_at': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true))
+        .timeout(const Duration(seconds: 20));
+  }
+
   Future<void> updateRiderLiveLocation({
     required String riderId,
     required double latitude,
