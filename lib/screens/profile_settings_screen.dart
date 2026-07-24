@@ -1,13 +1,11 @@
 import 'dart:typed_data';
 import 'dart:ui';
 
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
-import '../services/firestore_service.dart';
+import '../services/rider_service.dart';
+import '../services/supabase_service.dart';
 import '../utils/validators.dart';
 
 class ProfileSettingsScreen extends StatefulWidget {
@@ -20,11 +18,13 @@ class ProfileSettingsScreen extends StatefulWidget {
 }
 
 class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
-  final _firestoreService = FirestoreService();
+  final _riderService = RiderService();
+  final _supabaseService = SupabaseService();
   final _profileFormKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final _phoneController = TextEditingController();
   final _branchController = TextEditingController();
+  final _nicController = TextEditingController();
   final _addressController = TextEditingController();
   final _emergencyController = TextEditingController();
   final _vehicleNumberController = TextEditingController();
@@ -33,8 +33,12 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
 
   String? _vehicleType;
   String? _profilePhotoUrl;
+  String? _loadedProfileUserId;
+  String? _loadedProfileEmail;
+  String? _loadedProfileNic;
   Uint8List? _selectedPhotoBytes;
   String? _selectedPhotoName;
+  bool _profilePhotoUploadSkipped = false;
   bool _isProfileLoading = true;
   bool _isProfileSaving = false;
 
@@ -49,6 +53,7 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
     _nameController.dispose();
     _phoneController.dispose();
     _branchController.dispose();
+    _nicController.dispose();
     _addressController.dispose();
     _emergencyController.dispose();
     _vehicleNumberController.dispose();
@@ -57,14 +62,11 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
   }
 
   Future<void> _loadProfile() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) {
-      if (mounted) setState(() => _isProfileLoading = false);
-      return;
-    }
-
     try {
-      final profile = await _firestoreService.getRiderByUid(user.uid);
+      final user = await _supabaseService.currentUserOrRestored();
+      final profile = user == null
+          ? await _supabaseService.getCurrentRiderProfile()
+          : await _riderService.getRiderByUid(user.id);
       if (!mounted) return;
       setState(() {
         _nameController.text = _profileValue(profile, ['Name', 'full_name']);
@@ -73,9 +75,17 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
           'phone_number',
         ]);
         _branchController.text = _profileValue(profile, ['Branch', 'branch']);
+        _nicController.text = _profileValue(profile, ['NIC', 'nic_number']);
+        _loadedProfileUserId = _profileValue(profile, [
+          'user_id',
+          'id',
+          'firebase_uid',
+        ]);
+        _loadedProfileEmail = _profileValue(profile, ['email', 'Email']);
+        _loadedProfileNic = _nicController.text;
         _addressController.text = _profileValue(profile, [
           'Address',
-          'address',
+          'home_address',
         ]);
         _emergencyController.text = _profileValue(profile, [
           'Emergency_Contact',
@@ -88,6 +98,7 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
           _vehicleType = null;
         }
         _vehicleNumberController.text = _profileValue(profile, [
+          'Vehicle_Number',
           'Vehicle_No',
           'vehicle_number',
         ]);
@@ -142,54 +153,99 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
       RegExp(r'[^A-Za-z0-9._-]'),
       '_',
     );
-    final fileName = '${DateTime.now().millisecondsSinceEpoch}_$safeName';
-    final ref = FirebaseStorage.instance
-        .ref()
-        .child('rider_profiles')
-        .child(riderId)
-        .child(fileName);
+    try {
+      return await _supabaseService.uploadRiderProfilePhoto(
+        riderId: riderId,
+        fileBytes: bytes,
+        fileName: safeName,
+      );
+    } catch (error) {
+      if (!_isMissingStorageBucket(error)) rethrow;
+      _profilePhotoUploadSkipped = true;
+      return _profilePhotoUrl;
+    }
+  }
 
-    await ref.putData(bytes, SettableMetadata(contentType: 'image/jpeg'));
-    return ref.getDownloadURL();
+  bool _isMissingStorageBucket(Object error) {
+    final message = error.toString().toLowerCase();
+    return message.contains('bucket not found') ||
+        message.contains('storageexception') && message.contains('404');
   }
 
   Future<void> _saveProfile() async {
     final formState = _profileFormKey.currentState;
-    if (formState == null || !formState.validate() || _isProfileSaving) return;
+    if (_isProfileSaving) return;
+    if (formState == null || !formState.validate()) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please complete the highlighted fields.')),
+      );
+      return;
+    }
 
-    final user = FirebaseAuth.instance.currentUser;
+    final user = _supabaseService.currentUser;
     if (user == null) return;
 
     setState(() => _isProfileSaving = true);
+    _profilePhotoUploadSkipped = false;
 
     try {
-      final photoUrl = await _uploadSelectedPhoto(user.uid);
-      await _firestoreService.updateRiderProfile(
-        riderId: user.uid,
-        data: {
-          'Name': _nameController.text.trim(),
-          'Phone_Number': _phoneController.text.trim(),
-          'Branch': _branchController.text.trim(),
-          'Address': _addressController.text.trim(),
-          'Emergency_Contact': _emergencyController.text.trim(),
-          'Vehicle_Type': _vehicleType,
-          'Vehicle_No': _vehicleNumberController.text.trim(),
-          'Driver_Licence_No': _licenseController.text.trim(),
-          'Profile_Photo_Url': photoUrl,
-          'profile_photo_url': photoUrl,
-          'profile_completed_at': FieldValue.serverTimestamp(),
+      final photoUrl = await _uploadSelectedPhoto(user.id);
+      final now = DateTime.now().toIso8601String();
+      final updatedProfile = <String, dynamic>{
+        'id': user.id,
+        'user_id': user.id,
+        'firebase_uid': user.id,
+        if (user.email != null && user.email!.trim().isNotEmpty)
+          'email': user.email!.trim(),
+        if (_loadedProfileUserId != null &&
+            _loadedProfileUserId!.trim().isNotEmpty)
+          'original_user_id': _loadedProfileUserId!.trim(),
+        if (_loadedProfileEmail != null &&
+            _loadedProfileEmail!.trim().isNotEmpty)
+          'original_email': _loadedProfileEmail!.trim(),
+        if (_loadedProfileNic != null && _loadedProfileNic!.trim().isNotEmpty)
+          'original_NIC': _loadedProfileNic!.trim(),
+        'full_name': _nameController.text.trim(),
+        'Name': _nameController.text.trim(),
+        'phone_number': _phoneController.text.trim(),
+        'Phone_Number': _phoneController.text.trim(),
+        'branch': _branchController.text.trim(),
+        'Branch': _branchController.text.trim(),
+        'nic_number': _nicController.text.trim(),
+        'NIC': _nicController.text.trim(),
+        'home_address': _addressController.text.trim(),
+        'Address': _addressController.text.trim(),
+        'emergency_contact': _emergencyController.text.trim(),
+        'Emergency_Contact': _emergencyController.text.trim(),
+        'vehicle_type': _vehicleType,
+        'Vehicle_Type': _vehicleType,
+        'Vehicle_Number': _vehicleNumberController.text.trim(),
+        'vehicle_number': _vehicleNumberController.text.trim(),
+        'Vehicle_No': _vehicleNumberController.text.trim(),
+        'driving_license': _licenseController.text.trim(),
+        'Driver_Licence_No': _licenseController.text.trim(),
+        if (photoUrl != null && photoUrl.trim().isNotEmpty) ...{
+          'profile_photo_url': photoUrl.trim(),
+          'Profile_Photo_Url': photoUrl.trim(),
         },
+        'profile_completed_at': now,
+        'updated_at': now,
+      };
+
+      await _riderService.updateRiderProfile(
+        riderId: user.id,
+        data: updatedProfile,
       );
 
       if (!mounted) return;
-      setState(() {
-        _profilePhotoUrl = photoUrl;
-        _selectedPhotoBytes = null;
-        _selectedPhotoName = null;
-        _isProfileSaving = false;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Profile settings saved successfully.')),
+      Navigator.pushNamedAndRemoveUntil(
+        context,
+        '/settings',
+        (route) => route.settings.name == '/dashboard',
+        arguments: {
+          'profileSaved': true,
+          'photoUploadSkipped': _profilePhotoUploadSkipped,
+        },
       );
     } catch (e) {
       if (!mounted) return;
@@ -239,6 +295,7 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
               nameController: _nameController,
               phoneController: _phoneController,
               branchController: _branchController,
+              nicController: _nicController,
               addressController: _addressController,
               emergencyController: _emergencyController,
               vehicleNumberController: _vehicleNumberController,
@@ -265,6 +322,7 @@ class _ProfileSettingsCard extends StatelessWidget {
   final TextEditingController nameController;
   final TextEditingController phoneController;
   final TextEditingController branchController;
+  final TextEditingController nicController;
   final TextEditingController addressController;
   final TextEditingController emergencyController;
   final TextEditingController vehicleNumberController;
@@ -283,6 +341,7 @@ class _ProfileSettingsCard extends StatelessWidget {
     required this.nameController,
     required this.phoneController,
     required this.branchController,
+    required this.nicController,
     required this.addressController,
     required this.emergencyController,
     required this.vehicleNumberController,
@@ -424,6 +483,13 @@ class _ProfileSettingsCard extends StatelessWidget {
                         icon: Icons.store_outlined,
                         validator: (value) =>
                             Validators.validateRequired(value, 'Branch'),
+                      ),
+                      const SizedBox(height: 12),
+                      _ProfileField(
+                        controller: nicController,
+                        label: 'NIC Number',
+                        icon: Icons.credit_card_outlined,
+                        validator: Validators.validateNIC,
                       ),
                       const SizedBox(height: 12),
                       _ProfileField(

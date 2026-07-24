@@ -51,11 +51,10 @@ class Validators {
       return 'Phone number is required';
     }
 
-    // Sri Lankan phone number format: 07X XXXXXX or +947X XXXXXX
-    final phoneRegex = RegExp(r'^(\+94|0)[0-9]{9}$');
+    final digitsOnly = value.replaceAll(RegExp(r'\D'), '');
 
-    if (!phoneRegex.hasMatch(value.replaceAll(' ', ''))) {
-      return 'Please enter a valid phone number';
+    if (digitsOnly.length != 10) {
+      return 'Phone number must have 10 digits';
     }
 
     return null;

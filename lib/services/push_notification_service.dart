@@ -12,28 +12,23 @@ class PushNotificationService {
 
   Future<void> initialize() async {
     try {
-      // Firebase messaging initialization will happen here
-      // After running: flutter pub get
       developer.log('Push notification service initialized');
-      _initializeFirebase();
+      _initializePushProvider();
     } catch (e) {
       developer.log('Error initializing push notifications: $e');
     }
   }
 
-  Future<void> _initializeFirebase() async {
+  Future<void> _initializePushProvider() async {
     try {
-      // Dynamic import to handle optional Firebase dependency
-      // This will work after: flutter pub get
-      developer.log('Firebase messaging initialization started');
+      developer.log('Push provider initialization started');
     } catch (e) {
-      developer.log('Firebase not available yet. Run: flutter pub get');
+      developer.log('Push provider not configured yet.');
     }
   }
 
   Future<String?> getFCMToken() async {
     try {
-      // Will be implemented after firebase_messaging is installed
       return null;
     } catch (e) {
       developer.log('Error getting FCM token: $e');

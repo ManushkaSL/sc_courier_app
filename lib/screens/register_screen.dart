@@ -1,11 +1,10 @@
 import 'dart:async';
 import 'dart:ui';
 
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../services/firestore_service.dart';
+import '../services/rider_service.dart';
 import '../services/supabase_service.dart';
 import '../utils/validators.dart';
 import '../widgets/loading_overlay.dart';
@@ -117,18 +116,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
     User? createdUser;
 
     try {
-      // Create Firebase auth user
-      final cred = await FirebaseAuth.instance
-          .createUserWithEmailAndPassword(
+      final cred = await _supabaseService
+          .signUp(
             email: _emailController.text.trim(),
             password: _passwordController.text,
           )
           .timeout(const Duration(seconds: 30));
 
-      // NIC image upload is temporarily disabled — save profile without images.
-      final userId = cred.user?.uid;
+      // NIC image upload is temporarily disabled - save profile without images.
+      final userId = cred.user?.id;
       if (userId == null) {
-        throw Exception('Could not create Firebase user.');
+        throw Exception('Could not create Supabase user.');
       }
       createdUser = cred.user;
 
@@ -136,25 +134,38 @@ class _RegisterScreenState extends State<RegisterScreen> {
       final frontUrl = null;
       final backUrl = null;
 
-      final riderPayload = {
+      final riderPayload = <String, dynamic>{
+        'id': userId,
+        'user_id': userId,
+        'firebase_uid': userId,
+        'full_name': _fullNameController.text.trim(),
         'NIC': nic,
+        'nic_number': nic,
         'Name': _fullNameController.text.trim(),
+        'phone_number': _phoneNumberController.text.trim(),
         'Phone_Number': _phoneNumberController.text.trim(),
+        'branch': _branchController.text.trim(),
         'Branch': _branchController.text.trim(),
+        'email': _emailController.text.trim(),
         'Email': _emailController.text.trim(),
         'NIC_Front_Image': frontUrl,
+        'nic_front_image': frontUrl,
         'NIC_Back_Image': backUrl,
+        'nic_back_image': backUrl,
+        'home_address': _homeAddressController.text.trim(),
         'Address': _homeAddressController.text.trim(),
+        'emergency_contact': _emergencyContactController.text.trim(),
         'Emergency_Contact': _emergencyContactController.text.trim(),
+        'vehicle_type': _vehicleType,
         'Vehicle_Type': _vehicleType,
+        'vehicle_number': _vehicleNumberController.text.trim(),
         'Vehicle_No': _vehicleNumberController.text.trim(),
+        'driving_license': _drivingLicenseController.text.trim(),
         'Driver_Licence_No': _drivingLicenseController.text.trim(),
-        'firebase_uid': userId,
-        'created_at': FieldValue.serverTimestamp(),
         'created_at_iso': DateTime.now().toIso8601String(),
       };
 
-      await FirestoreService().saveRider(riderPayload);
+      await RiderService().saveRider(riderPayload);
 
       if (!mounted) return;
       Navigator.pushNamedAndRemoveUntil(
@@ -163,10 +174,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
         (_) => false,
       );
     } catch (e) {
-      final authUser = FirebaseAuth.instance.currentUser;
-      if (createdUser != null && authUser?.uid == createdUser.uid) {
+      final authUser = _supabaseService.currentUser;
+      if (createdUser != null && authUser?.id == createdUser.id) {
         try {
-          await authUser?.delete();
+          await _supabaseService.deleteCurrentUser();
         } catch (_) {}
       }
 
@@ -188,34 +199,38 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   String _registrationErrorMessage(Object error) {
     if (error is TimeoutException || error.toString().contains('timed out')) {
-      return 'Registration is taking too long. Please try again or check Firebase rules.';
+      return 'Registration is taking too long. Please try again or check Supabase policies.';
     }
 
-    if (error is FirebaseAuthException) {
-      switch (error.code) {
-        case 'email-already-in-use':
-          return 'This email is already registered. Try logging in or use a different email.';
-        case 'invalid-email':
-          return 'Invalid email format. Please check your email address.';
-        case 'weak-password':
-          return 'Password must be at least 6 characters.';
-        case 'too-many-requests':
-          return 'Too many registration attempts. Please wait a few minutes and try again.';
+    if (error is AuthException) {
+      final message = error.message.toLowerCase();
+      if (message.contains('already')) {
+        return 'This email is already registered. Try logging in or use a different email.';
       }
+      if (message.contains('invalid email')) {
+        return 'Invalid email format. Please check your email address.';
+      }
+      if (message.contains('password')) {
+        return 'Password must be at least 6 characters.';
+      }
+      if (message.contains('rate') || message.contains('too many')) {
+        return 'Too many registration attempts. Please wait a few minutes and try again.';
+      }
+      return error.message;
     }
 
-    if (error is FirebaseException) {
-      if (error.code == 'permission-denied' || error.code == 'unauthorized') {
-        return 'Firebase permission denied. Deploy updated Firestore/Storage rules then try again.';
+    if (error is PostgrestException) {
+      if (error.code == '42501' || error.message.contains('permission')) {
+        return 'Supabase permission denied. Check table RLS policies and try again.';
       }
-      return 'Firebase error (${error.code}): ${error.message ?? error.toString()}';
+      return 'Supabase database error: ${error.message}';
     }
 
     final rawMessage = error.toString();
     if (rawMessage.contains('permission-denied') ||
         rawMessage.contains('unauthorized') ||
         rawMessage.contains('403')) {
-      return 'Firebase permission denied. Deploy updated Firestore/Storage rules then try again.';
+      return 'Supabase permission denied. Check table/storage RLS policies and try again.';
     }
 
     return 'Registration failed: $rawMessage';
@@ -420,8 +435,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                       validator: (v) {
                                         if (!_isFieldInCurrentStep(
                                           'Confirm Password',
-                                        ))
+                                        )) {
                                           return null;
+                                        }
                                         return Validators.validatePasswordMatch(
                                           v,
                                           _passwordController.text,
@@ -532,8 +548,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                           setState(() => _vehicleType = v),
                                       validator: (_) {
                                         if (_currentStep != 2) return null;
-                                        if (_vehicleType == null)
+                                        if (_vehicleType == null) {
                                           return 'This field is required';
+                                        }
                                         return null;
                                       },
                                     ),

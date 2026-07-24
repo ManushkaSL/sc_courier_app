@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:lottie/lottie.dart';
 import '../widgets/loading_overlay.dart';
 import '../widgets/premium_button.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import '../services/supabase_service.dart';
 import '../utils/validators.dart';
 import 'register_screen.dart';
 import 'dashboard_screen.dart';
@@ -21,7 +21,7 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _isLoading = false;
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
-  // final _supabaseService = SupabaseService();
+  final _supabaseService = SupabaseService();
   final _formKey = GlobalKey<FormState>();
   String? _errorMessage;
 
@@ -44,7 +44,7 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = true);
 
     try {
-      await FirebaseAuth.instance.signInWithEmailAndPassword(
+      await _supabaseService.signIn(
         email: _emailController.text.trim(),
         password: _passwordController.text,
       );

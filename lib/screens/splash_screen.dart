@@ -3,7 +3,6 @@ import 'package:video_player/video_player.dart';
 import 'dart:developer' as developer;
 import 'login_screen.dart';
 import 'dashboard_screen.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import '../services/supabase_service.dart';
 
 class SplashScreen extends StatefulWidget {
@@ -69,8 +68,7 @@ class _SplashScreenState extends State<SplashScreen> {
     if (_hasNavigated || !mounted) return;
     _hasNavigated = true;
 
-    // Check if user is authenticated using FirebaseAuth
-    final isAuthenticated = FirebaseAuth.instance.currentUser != null;
+    final isAuthenticated = _supabaseService.isAuthenticated;
     final nextScreen = isAuthenticated
         ? DashboardScreen.routeName
         : LoginScreen.routeName;

@@ -4,9 +4,8 @@ import 'login_screen.dart';
 import 'settings_screen.dart';
 import 'extend_delivery_screen.dart';
 import '../services/location_service.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import '../services/supabase_service.dart';
-import '../services/firestore_service.dart';
+import '../services/rider_service.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -40,8 +39,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Future<void> _loadData() async {
     try {
-      final firebaseUser = FirebaseAuth.instance.currentUser;
-      if (firebaseUser == null) {
+      final currentUser = _supabaseService.currentUser;
+      if (currentUser == null) {
         Navigator.pushNamedAndRemoveUntil(
           context,
           LoginScreen.routeName,
@@ -51,16 +50,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
       }
 
       // Fetch user profile
-      final profile = await FirestoreService().getRiderByUid(firebaseUser.uid);
-      if (profile != null) {
-        riderName = profile['Name'] ?? 'Rider';
-      }
+      final profile = await RiderService().getRiderByUid(currentUser.id);
+      riderName = _profileValue(profile, ['full_name', 'Name'], 'Rider');
 
       // Fetch deliveries
       final deliveries = await _supabaseService.getDeliveries();
 
       // Fetch stats
-      final stats = await _supabaseService.getRiderStats(firebaseUser.uid);
+      final stats = await _supabaseService.getRiderStats(currentUser.id);
 
       if (mounted) {
         setState(() {
@@ -81,6 +78,30 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   void _onLocationChanged() {
     if (mounted) setState(() {});
+  }
+
+  String _profileValue(
+    Map<String, dynamic>? profile,
+    List<String> keys,
+    String fallback,
+  ) {
+    if (profile == null) return fallback;
+    for (final key in keys) {
+      final value = profile[key];
+      if (value is String && value.trim().isNotEmpty) return value.trim();
+    }
+    return fallback;
+  }
+
+  Future<void> _openSettings() async {
+    final shouldReload = await Navigator.pushNamed(
+      context,
+      SettingsScreen.routeName,
+    );
+    if (!mounted) return;
+    if (shouldReload == true) {
+      await _loadData();
+    }
   }
 
   @override
@@ -120,8 +141,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           IconButton(
             icon: const Icon(Icons.settings_outlined, color: Color(0xFFF97316)),
             tooltip: 'Settings',
-            onPressed: () =>
-                Navigator.pushNamed(context, SettingsScreen.routeName),
+            onPressed: _openSettings,
           ),
         ],
       ),
@@ -238,8 +258,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   const SizedBox(height: 18),
                   // ─── GPS Tracking Status Card ─────────────────────────────
                   GestureDetector(
-                    onTap: () =>
-                        Navigator.pushNamed(context, SettingsScreen.routeName),
+                    onTap: _openSettings,
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(20),
                       child: BackdropFilter(

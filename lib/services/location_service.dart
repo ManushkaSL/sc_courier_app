@@ -1,10 +1,10 @@
 import 'dart:async';
 
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 
-import 'firestore_service.dart';
+import 'rider_service.dart';
+import 'supabase_service.dart';
 
 class LocationService extends ChangeNotifier {
   // Singleton
@@ -17,6 +17,7 @@ class LocationService extends ChangeNotifier {
   String _statusMessage = 'GPS tracking is off';
   StreamSubscription<Position>? _positionStream;
   String? _trackingRiderId;
+  final _supabaseService = SupabaseService();
 
   bool get isTracking => _isTracking;
   Position? get currentPosition => _currentPosition;
@@ -44,7 +45,7 @@ class LocationService extends ChangeNotifier {
 
   /// Starts GPS tracking. Returns an error message on failure, null on success.
   Future<String?> startTracking() async {
-    final riderId = FirebaseAuth.instance.currentUser?.uid;
+    final riderId = _supabaseService.currentUser?.id;
     if (riderId == null) {
       _statusMessage = 'Sign in before starting GPS tracking.';
       notifyListeners();
@@ -89,7 +90,7 @@ class LocationService extends ChangeNotifier {
   }
 
   Future<void> stopTracking() async {
-    final riderId = _trackingRiderId ?? FirebaseAuth.instance.currentUser?.uid;
+    final riderId = _trackingRiderId ?? _supabaseService.currentUser?.id;
     await _positionStream?.cancel();
     _positionStream = null;
     _isTracking = false;
@@ -100,7 +101,7 @@ class LocationService extends ChangeNotifier {
 
     if (riderId != null) {
       try {
-        await FirestoreService().markRiderLocationOffline(riderId);
+        await RiderService().markRiderLocationOffline(riderId);
       } catch (e) {
         _statusMessage = 'GPS tracking is off. Offline sync failed: $e';
         notifyListeners();
@@ -113,7 +114,7 @@ class LocationService extends ChangeNotifier {
     if (riderId == null) return;
 
     try {
-      await FirestoreService().updateRiderLiveLocation(
+      await RiderService().updateRiderLiveLocation(
         riderId: riderId,
         latitude: position.latitude,
         longitude: position.longitude,

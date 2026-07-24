@@ -1,11 +1,11 @@
 import 'dart:ui';
 
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 import '../services/location_service.dart';
+import '../services/supabase_service.dart';
 import 'login_screen.dart';
 import 'profile_settings_screen.dart';
 
@@ -21,8 +21,11 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen>
     with SingleTickerProviderStateMixin {
   final _locationService = LocationService();
+  final _supabaseService = SupabaseService();
   GoogleMapController? _mapController;
   late final AnimationController _pulseCtrl;
+  bool _profileChanged = false;
+  bool _handledRouteArguments = false;
 
   @override
   void initState() {
@@ -40,6 +43,23 @@ class _SettingsScreenState extends State<SettingsScreen>
     _mapController?.dispose();
     _pulseCtrl.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_handledRouteArguments) return;
+    _handledRouteArguments = true;
+
+    final arguments = ModalRoute.of(context)?.settings.arguments;
+    if (arguments is! Map || arguments['profileSaved'] != true) return;
+
+    _profileChanged = true;
+    final photoUploadSkipped = arguments['photoUploadSkipped'] == true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _showProfileSavedMessage(photoUploadSkipped: photoUploadSkipped);
+    });
   }
 
   void _onLocationChanged() {
@@ -76,12 +96,37 @@ class _SettingsScreenState extends State<SettingsScreen>
     if (_locationService.isTracking) {
       await _locationService.stopTracking();
     }
-    await FirebaseAuth.instance.signOut();
+    await _supabaseService.signOut();
     if (!mounted) return;
     Navigator.pushNamedAndRemoveUntil(
       context,
       LoginScreen.routeName,
       (_) => false,
+    );
+  }
+
+  Future<void> _openProfileSettings() async {
+    final updatedProfile = await Navigator.pushNamed(
+      context,
+      ProfileSettingsScreen.routeName,
+    );
+    if (!mounted || updatedProfile == null) return;
+
+    final photoUploadSkipped =
+        updatedProfile is Map && updatedProfile['photoUploadSkipped'] == true;
+    setState(() => _profileChanged = true);
+    _showProfileSavedMessage(photoUploadSkipped: photoUploadSkipped);
+  }
+
+  void _showProfileSavedMessage({required bool photoUploadSkipped}) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          photoUploadSkipped
+              ? 'Profile saved. Photo upload skipped because storage is not set up.'
+              : 'Profile settings saved successfully.',
+        ),
+      ),
     );
   }
 
@@ -103,7 +148,7 @@ class _SettingsScreenState extends State<SettingsScreen>
         backgroundColor: Colors.transparent,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white),
-          onPressed: () => Navigator.pop(context),
+          onPressed: () => Navigator.pop(context, _profileChanged),
         ),
         title: const Text(
           'Settings',
@@ -135,10 +180,7 @@ class _SettingsScreenState extends State<SettingsScreen>
                       icon: Icons.person_outline,
                       label: 'Profile Settings',
                       subtitle: 'Name, phone, photo, and vehicle details',
-                      onTap: () => Navigator.pushNamed(
-                        context,
-                        ProfileSettingsScreen.routeName,
-                      ),
+                      onTap: _openProfileSettings,
                     ),
                   ],
                 ),
