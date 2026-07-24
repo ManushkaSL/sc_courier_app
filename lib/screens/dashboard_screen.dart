@@ -1,11 +1,18 @@
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'login_screen.dart';
 import 'settings_screen.dart';
 import 'extend_delivery_screen.dart';
+import 'gps_tracking_screen.dart';
 import '../services/location_service.dart';
 import '../services/supabase_service.dart';
 import '../services/rider_service.dart';
+
+const _brandOrange = Color(0xFFF97316);
+const _successGreen = Color(0xFF4ADE80);
+const _appBg = Color(0xFF151515);
+const _surface = Color(0xFF222222);
+const _border = Color(0xFF343434);
+const _textMuted = Color(0xFFB8B8B8);
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -49,14 +56,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
         return;
       }
 
-      // Fetch user profile
       final profile = await RiderService().getRiderByUid(currentUser.id);
       riderName = _profileValue(profile, ['full_name', 'Name'], 'Rider');
 
-      // Fetch deliveries
       final deliveries = await _supabaseService.getDeliveries();
-
-      // Fetch stats
       final stats = await _supabaseService.getRiderStats(currentUser.id);
 
       if (mounted) {
@@ -104,20 +107,29 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
+  void _openAddDelivery() {
+    Navigator.pushNamed(context, ExtendDeliveryScreen.routeName);
+  }
+
+  void _openGpsTracking() {
+    Navigator.pushNamed(context, GpsTrackingScreen.routeName);
+  }
+
   @override
   Widget build(BuildContext context) {
     final isTracking = _locationService.isTracking;
     final position = _locationService.currentPosition;
-    final gpsColor = isTracking ? const Color(0xFF4ADE80) : Colors.white38;
 
     return Scaffold(
-      extendBodyBehindAppBar: true,
+      backgroundColor: _appBg,
       appBar: AppBar(
-        backgroundColor: Colors.transparent,
+        backgroundColor: _appBg,
+        surfaceTintColor: Colors.transparent,
         automaticallyImplyLeading: false,
+        titleSpacing: 20,
         title: Row(
           children: [
-            Image.asset('assets/logo.png', height: 28, width: 28),
+            Image.asset('assets/logo.png', height: 24, width: 24),
             const SizedBox(width: 10),
             const Expanded(
               child: Text(
@@ -125,7 +137,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   color: Colors.white,
-                  fontWeight: FontWeight.w700,
+                  fontWeight: FontWeight.w800,
                   fontSize: 18,
                 ),
               ),
@@ -134,502 +146,225 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh_outlined, color: Color(0xFFF97316)),
+            icon: const Icon(Icons.refresh_outlined),
+            color: Colors.white70,
             tooltip: 'Refresh deliveries',
             onPressed: _loadData,
           ),
           IconButton(
-            icon: const Icon(Icons.settings_outlined, color: Color(0xFFF97316)),
+            icon: const Icon(Icons.settings_outlined),
+            color: Colors.white70,
             tooltip: 'Settings',
             onPressed: _openSettings,
           ),
+          const SizedBox(width: 8),
         ],
       ),
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFF1A1A1A), Color(0xFF212121), Color(0xFF1A1A1A)],
-          ),
-        ),
-        child: SafeArea(
-          child: RefreshIndicator(
-            onRefresh: _loadData,
-            color: const Color(0xFFF97316),
-            backgroundColor: const Color(0xFF2A2A2A),
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-              physics: const AlwaysScrollableScrollPhysics(),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  // Welcome glass card
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(24),
-                    child: BackdropFilter(
-                      filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.07),
-                          borderRadius: BorderRadius.circular(24),
-                          border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.12),
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.3),
-                              blurRadius: 24,
-                              offset: const Offset(0, 8),
-                            ),
-                          ],
-                        ),
-                        padding: const EdgeInsets.all(22),
-                        child: Row(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.all(14),
-                              decoration: BoxDecoration(
-                                color: const Color(
-                                  0xFFF97316,
-                                ).withValues(alpha: 0.15),
-                                shape: BoxShape.circle,
-                              ),
-                              child: const Icon(
-                                Icons.delivery_dining,
-                                color: Color(0xFFF97316),
-                                size: 32,
-                              ),
-                            ),
-                            const SizedBox(width: 16),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    riderName,
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 20,
-                                      fontWeight: FontWeight.w800,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  const Text(
-                                    'Ready for deliveries?',
-                                    style: TextStyle(
-                                      color: Color(0xFFAAAAAA),
-                                      fontSize: 13,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 6,
-                              ),
-                              decoration: BoxDecoration(
-                                color: const Color(
-                                  0xFFF97316,
-                                ).withValues(alpha: 0.15),
-                                borderRadius: BorderRadius.circular(20),
-                                border: Border.all(
-                                  color: const Color(
-                                    0xFFF97316,
-                                  ).withValues(alpha: 0.4),
-                                ),
-                              ),
-                              child: const Text(
-                                'Online',
-                                style: TextStyle(
-                                  color: Color(0xFFF97316),
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 18),
-                  // ─── GPS Tracking Status Card ─────────────────────────────
-                  GestureDetector(
-                    onTap: _openSettings,
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(20),
-                      child: BackdropFilter(
-                        filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 400),
-                          decoration: BoxDecoration(
-                            color: isTracking
-                                ? const Color(
-                                    0xFF4ADE80,
-                                  ).withValues(alpha: 0.07)
-                                : Colors.white.withValues(alpha: 0.05),
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(
-                              color: isTracking
-                                  ? const Color(
-                                      0xFF4ADE80,
-                                    ).withValues(alpha: 0.30)
-                                  : Colors.white.withValues(alpha: 0.09),
-                            ),
-                          ),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 18,
-                            vertical: 14,
-                          ),
-                          child: Row(
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.all(10),
-                                decoration: BoxDecoration(
-                                  color: gpsColor.withValues(alpha: 0.12),
-                                  shape: BoxShape.circle,
-                                ),
-                                child: Icon(
-                                  isTracking ? Icons.gps_fixed : Icons.gps_off,
-                                  color: gpsColor,
-                                  size: 22,
-                                ),
-                              ),
-                              const SizedBox(width: 14),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      isTracking
-                                          ? 'GPS Tracking Active'
-                                          : 'GPS Tracking Off',
-                                      style: TextStyle(
-                                        color: gpsColor,
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      position != null
-                                          ? '${position.latitude.toStringAsFixed(4)}, '
-                                                '${position.longitude.toStringAsFixed(4)}'
-                                          : isTracking
-                                          ? 'Getting location…'
-                                          : 'Tap to open settings',
-                                      style: TextStyle(
-                                        color: Colors.white.withValues(
-                                          alpha: 0.45,
-                                        ),
-                                        fontSize: 12,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              Icon(
-                                Icons.chevron_right,
-                                color: Colors.white.withValues(alpha: 0.3),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 18),
-                  // Stats row
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _StatCard(
-                          icon: Icons.check_circle_outline,
-                          label: 'Delivered',
-                          value: _stats['completed'].toString(),
-                          color: const Color(0xFF4ADE80),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: _StatCard(
-                          icon: Icons.pending_outlined,
-                          label: 'Pending',
-                          value: _stats['pending'].toString(),
-                          color: const Color(0xFFF97316),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: _StatCard(
-                          icon: Icons.attach_money,
-                          label: 'Earnings',
-                          value:
-                              'Rs. ${_stats['total_earnings']?.toStringAsFixed(2) ?? '0.00'}',
-                          color: const Color(0xFF4ADE80),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 18),
-                  // Active deliveries glass card
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(20),
-                    child: BackdropFilter(
-                      filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.06),
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.10),
-                          ),
-                        ),
-                        padding: const EdgeInsets.all(20),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                const Icon(
-                                  Icons.local_shipping_outlined,
-                                  color: Color(0xFFF97316),
-                                  size: 20,
-                                ),
-                                const SizedBox(width: 8),
-                                const Text(
-                                  'Active Deliveries',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 20),
-                            if (_isLoading)
-                              const Center(
-                                child: CircularProgressIndicator(
-                                  color: Color(0xFFF97316),
-                                ),
-                              )
-                            else if (_deliveries.isEmpty)
-                              Center(
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 20,
-                                  ),
-                                  child: Column(
-                                    children: [
-                                      Icon(
-                                        Icons.inbox_outlined,
-                                        color: Colors.white.withValues(
-                                          alpha: 0.3,
-                                        ),
-                                        size: 40,
-                                      ),
-                                      const SizedBox(height: 8),
-                                      Text(
-                                        'No active deliveries',
-                                        style: TextStyle(
-                                          color: Colors.white.withValues(
-                                            alpha: 0.5,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              )
-                            else
-                              SingleChildScrollView(
-                                scrollDirection: Axis.horizontal,
-                                child: Theme(
-                                  data: Theme.of(context).copyWith(
-                                    dividerColor: Colors.white.withValues(
-                                      alpha: 0.1,
-                                    ),
-                                  ),
-                                  child: DataTable(
-                                    headingTextStyle: const TextStyle(
-                                      color: Color(0xFFF97316),
-                                      fontWeight: FontWeight.w700,
-                                      fontSize: 13,
-                                    ),
-                                    dataTextStyle: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 13,
-                                    ),
-                                    columnSpacing: 20,
-                                    columns: const [
-                                      DataColumn(label: Text('ID')),
-                                      DataColumn(label: Text('Location')),
-                                      DataColumn(label: Text('Status')),
-                                    ],
-                                    rows: _deliveries
-                                        .map(
-                                          (delivery) => DataRow(
-                                            cells: [
-                                              DataCell(
-                                                Text(
-                                                  delivery['id']
-                                                          ?.toString()
-                                                          .substring(0, 8) ??
-                                                      'N/A',
-                                                ),
-                                              ),
-                                              DataCell(
-                                                Text(
-                                                  delivery['delivery_address'] ??
-                                                      'Unknown',
-                                                ),
-                                              ),
-                                              DataCell(
-                                                Container(
-                                                  padding:
-                                                      const EdgeInsets.symmetric(
-                                                        horizontal: 8,
-                                                        vertical: 4,
-                                                      ),
-                                                  decoration: BoxDecoration(
-                                                    color:
-                                                        (delivery['status'] ==
-                                                                    'completed'
-                                                                ? const Color(
-                                                                    0xFF4ADE80,
-                                                                  )
-                                                                : const Color(
-                                                                    0xFFF97316,
-                                                                  ))
-                                                            .withValues(
-                                                              alpha: 0.2,
-                                                            ),
-                                                    borderRadius:
-                                                        BorderRadius.circular(
-                                                          6,
-                                                        ),
-                                                  ),
-                                                  child: Text(
-                                                    delivery['status'] ??
-                                                        'Unknown',
-                                                    style: TextStyle(
-                                                      color:
-                                                          delivery['status'] ==
-                                                              'completed'
-                                                          ? const Color(
-                                                              0xFF4ADE80,
-                                                            )
-                                                          : const Color(
-                                                              0xFFF97316,
-                                                            ),
-                                                      fontSize: 11,
-                                                      fontWeight:
-                                                          FontWeight.w700,
-                                                    ),
-                                                  ),
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        )
-                                        .toList(),
-                                  ),
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 18),
-                  // Extend Delivery Button
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(20),
-                    child: BackdropFilter(
-                      filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: const Color(
-                            0xFFF97316,
-                          ).withValues(alpha: 0.08),
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(
-                            color: const Color(
-                              0xFFF97316,
-                            ).withValues(alpha: 0.25),
-                          ),
-                        ),
-                        padding: const EdgeInsets.all(20),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Row(
-                              children: [
-                                Container(
-                                  padding: const EdgeInsets.all(10),
-                                  decoration: BoxDecoration(
-                                    color: const Color(
-                                      0xFFF97316,
-                                    ).withValues(alpha: 0.15),
-                                    shape: BoxShape.circle,
-                                  ),
-                                  child: const Icon(
-                                    Icons.add_location_alt_outlined,
-                                    color: Color(0xFFF97316),
-                                    size: 20,
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                const Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        'Add New Delivery',
-                                        style: TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.w700,
-                                        ),
-                                      ),
-                                      SizedBox(height: 2),
-                                      Text(
-                                        'Extend your delivery list',
-                                        style: TextStyle(
-                                          color: Color(0xFFAAAAAA),
-                                          fontSize: 12,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 14),
-                            ElevatedButton.icon(
-                              onPressed: () => Navigator.pushNamed(
-                                context,
-                                ExtendDeliveryScreen.routeName,
-                              ),
-                              icon: const Icon(Icons.add),
-                              label: const Text('Extend Delivery'),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+      body: SafeArea(
+        top: false,
+        child: RefreshIndicator(
+          onRefresh: _loadData,
+          color: _brandOrange,
+          backgroundColor: _surface,
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+            physics: const AlwaysScrollableScrollPhysics(),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _RiderHeader(riderName: riderName),
+                const SizedBox(height: 14),
+                _GpsStatusTile(
+                  isTracking: isTracking,
+                  latitude: position?.latitude,
+                  longitude: position?.longitude,
+                  onTap: _openGpsTracking,
+                ),
+                const SizedBox(height: 18),
+                _StatsRow(stats: _stats),
+                const SizedBox(height: 22),
+                _SectionHeader(
+                  icon: Icons.local_shipping_outlined,
+                  label: 'Active Deliveries',
+                  actionLabel: 'Add',
+                  onAction: _openAddDelivery,
+                ),
+                const SizedBox(height: 10),
+                _ActiveDeliveriesPanel(
+                  isLoading: _isLoading,
+                  deliveries: _deliveries,
+                ),
+                const SizedBox(height: 18),
+                _AddDeliveryPanel(onTap: _openAddDelivery),
+              ],
             ),
           ),
         ),
       ),
+    );
+  }
+}
+
+class _RiderHeader extends StatelessWidget {
+  final String riderName;
+
+  const _RiderHeader({required this.riderName});
+
+  @override
+  Widget build(BuildContext context) {
+    return _SurfacePanel(
+      padding: const EdgeInsets.all(16),
+      child: Row(
+        children: [
+          Container(
+            width: 48,
+            height: 48,
+            decoration: const BoxDecoration(
+              color: Color(0xFF3A2A20),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.delivery_dining,
+              color: _brandOrange,
+              size: 26,
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  riderName.isEmpty ? 'Rider' : riderName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                const Text(
+                  'Ready for deliveries',
+                  style: TextStyle(color: _textMuted, fontSize: 13),
+                ),
+              ],
+            ),
+          ),
+          const _StatusPill(label: 'Online', color: _successGreen),
+        ],
+      ),
+    );
+  }
+}
+
+class _GpsStatusTile extends StatelessWidget {
+  final bool isTracking;
+  final double? latitude;
+  final double? longitude;
+  final VoidCallback onTap;
+
+  const _GpsStatusTile({
+    required this.isTracking,
+    required this.latitude,
+    required this.longitude,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final color = isTracking ? _successGreen : const Color(0xFFFFB020);
+    final hasLocation = latitude != null && longitude != null;
+
+    return Material(
+      color: isTracking
+          ? _successGreen.withValues(alpha: 0.08)
+          : const Color(0xFFFFB020).withValues(alpha: 0.08),
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: color.withValues(alpha: 0.28)),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+          child: Row(
+            children: [
+              Icon(isTracking ? Icons.gps_fixed : Icons.gps_off, color: color),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      isTracking ? 'GPS tracking active' : 'GPS tracking is off',
+                      style: TextStyle(
+                        color: color,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      hasLocation
+                          ? '${latitude!.toStringAsFixed(4)}, ${longitude!.toStringAsFixed(4)}'
+                          : isTracking
+                          ? 'Waiting for current location'
+                          : 'Open settings to start rider location sharing',
+                      style: const TextStyle(color: _textMuted, fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_right, color: Colors.white54),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _StatsRow extends StatelessWidget {
+  final Map<String, dynamic> stats;
+
+  const _StatsRow({required this.stats});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: _StatCard(
+            icon: Icons.check_circle_outline,
+            label: 'Delivered',
+            value: stats['completed'].toString(),
+            color: _successGreen,
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _StatCard(
+            icon: Icons.pending_outlined,
+            label: 'Pending',
+            value: stats['pending'].toString(),
+            color: const Color(0xFFFFB020),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _StatCard(
+            icon: Icons.payments_outlined,
+            label: 'Earnings',
+            value:
+                'Rs. ${stats['total_earnings']?.toStringAsFixed(2) ?? '0.00'}',
+            color: _successGreen,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -649,42 +384,317 @@ class _StatCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(18),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-        child: Container(
-          decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.08),
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: color.withValues(alpha: 0.2)),
+    return _SurfacePanel(
+      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 10),
+      child: Column(
+        children: [
+          Icon(icon, color: color, size: 21),
+          const SizedBox(height: 8),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              value,
+              maxLines: 1,
+              style: TextStyle(
+                color: color,
+                fontSize: 20,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
           ),
-          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 10),
-          child: Column(
-            children: [
-              Icon(icon, color: color, size: 22),
-              const SizedBox(height: 8),
-              Text(
-                value,
-                style: TextStyle(
-                  color: color,
-                  fontSize: 22,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                label,
-                style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.55),
-                  fontSize: 11,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ],
+          const SizedBox(height: 4),
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: _textMuted,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SectionHeader extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String? actionLabel;
+  final VoidCallback? onAction;
+
+  const _SectionHeader({
+    required this.icon,
+    required this.label,
+    this.actionLabel,
+    this.onAction,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon, color: _brandOrange, size: 20),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            label,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 17,
+              fontWeight: FontWeight.w800,
+            ),
           ),
         ),
+        if (actionLabel != null && onAction != null)
+          TextButton.icon(
+            onPressed: onAction,
+            icon: const Icon(Icons.add, size: 18),
+            label: Text(actionLabel!),
+          ),
+      ],
+    );
+  }
+}
+
+class _ActiveDeliveriesPanel extends StatelessWidget {
+  final bool isLoading;
+  final List<Map<String, dynamic>> deliveries;
+
+  const _ActiveDeliveriesPanel({
+    required this.isLoading,
+    required this.deliveries,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return _SurfacePanel(
+      padding: const EdgeInsets.all(16),
+      child: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 200),
+        child: isLoading
+            ? const SizedBox(
+                height: 120,
+                child: Center(
+                  child: CircularProgressIndicator(color: _brandOrange),
+                ),
+              )
+            : deliveries.isEmpty
+            ? const _EmptyDeliveries()
+            : _DeliveriesTable(deliveries: deliveries),
       ),
+    );
+  }
+}
+
+class _EmptyDeliveries extends StatelessWidget {
+  const _EmptyDeliveries();
+
+  @override
+  Widget build(BuildContext context) {
+    return const SizedBox(
+      height: 126,
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.inbox_outlined, color: Colors.white38, size: 34),
+            SizedBox(height: 8),
+            Text(
+              'No active deliveries',
+              style: TextStyle(
+                color: _textMuted,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DeliveriesTable extends StatelessWidget {
+  final List<Map<String, dynamic>> deliveries;
+
+  const _DeliveriesTable({required this.deliveries});
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Theme(
+        data: Theme.of(context).copyWith(
+          dividerColor: Colors.white.withValues(alpha: 0.08),
+        ),
+        child: DataTable(
+          headingTextStyle: const TextStyle(
+            color: _textMuted,
+            fontWeight: FontWeight.w700,
+            fontSize: 12,
+          ),
+          dataTextStyle: const TextStyle(color: Colors.white, fontSize: 13),
+          columnSpacing: 20,
+          horizontalMargin: 0,
+          columns: const [
+            DataColumn(label: Text('ID')),
+            DataColumn(label: Text('Location')),
+            DataColumn(label: Text('Status')),
+          ],
+          rows: deliveries
+              .map(
+                (delivery) => DataRow(
+                  cells: [
+                    DataCell(
+                      Text(delivery['id']?.toString().substring(0, 8) ?? 'N/A'),
+                    ),
+                    DataCell(Text(delivery['delivery_address'] ?? 'Unknown')),
+                    DataCell(_DeliveryStatus(status: delivery['status'])),
+                  ],
+                ),
+              )
+              .toList(),
+        ),
+      ),
+    );
+  }
+}
+
+class _DeliveryStatus extends StatelessWidget {
+  final dynamic status;
+
+  const _DeliveryStatus({required this.status});
+
+  @override
+  Widget build(BuildContext context) {
+    final text = status?.toString() ?? 'Unknown';
+    final isCompleted = text == 'completed';
+    final color = isCompleted ? _successGreen : const Color(0xFFFFB020);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          color: color,
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    );
+  }
+}
+
+class _AddDeliveryPanel extends StatelessWidget {
+  final VoidCallback onTap;
+
+  const _AddDeliveryPanel({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return _SurfacePanel(
+      padding: const EdgeInsets.all(16),
+      borderColor: _brandOrange.withValues(alpha: 0.22),
+      child: Row(
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: _brandOrange.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Icon(
+              Icons.add_location_alt_outlined,
+              color: _brandOrange,
+            ),
+          ),
+          const SizedBox(width: 12),
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Add Delivery',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                SizedBox(height: 2),
+                Text(
+                  'Create a new delivery request',
+                  style: TextStyle(color: _textMuted, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+          FilledButton.icon(
+            onPressed: onTap,
+            icon: const Icon(Icons.add, size: 18),
+            label: const Text('Add'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StatusPill extends StatelessWidget {
+  final String label;
+  final Color color;
+
+  const _StatusPill({required this.label, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(30),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: color,
+          fontSize: 12,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    );
+  }
+}
+
+class _SurfacePanel extends StatelessWidget {
+  final Widget child;
+  final EdgeInsetsGeometry padding;
+  final Color borderColor;
+
+  const _SurfacePanel({
+    required this.child,
+    required this.padding,
+    this.borderColor = _border,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: _surface,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: borderColor),
+      ),
+      padding: padding,
+      child: child,
     );
   }
 }

@@ -1,5 +1,4 @@
 import 'dart:typed_data';
-import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -7,6 +6,13 @@ import 'package:image_picker/image_picker.dart';
 import '../services/rider_service.dart';
 import '../services/supabase_service.dart';
 import '../utils/validators.dart';
+
+const _brandOrange = Color(0xFFF97316);
+const _appBg = Color(0xFF151515);
+const _surface = Color(0xFF222222);
+const _surfaceSoft = Color(0xFF2A2A2A);
+const _border = Color(0xFF343434);
+const _textMuted = Color(0xFFB8B8B8);
 
 class ProfileSettingsScreen extends StatefulWidget {
   const ProfileSettingsScreen({super.key});
@@ -259,9 +265,10 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      extendBodyBehindAppBar: true,
+      backgroundColor: _appBg,
       appBar: AppBar(
-        backgroundColor: Colors.transparent,
+        backgroundColor: _appBg,
+        surfaceTintColor: Colors.transparent,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white),
           onPressed: () => Navigator.pop(context),
@@ -270,53 +277,42 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
           'Profile Settings',
           style: TextStyle(
             color: Colors.white,
-            fontWeight: FontWeight.w700,
+            fontWeight: FontWeight.w800,
             fontSize: 18,
           ),
         ),
       ),
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFF1A1A1A), Color(0xFF212121), Color(0xFF1A1A1A)],
-          ),
-        ),
-        child: SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-            child: _ProfileSettingsCard(
-              formKey: _profileFormKey,
-              isLoading: _isProfileLoading,
-              isSaving: _isProfileSaving,
-              selectedPhotoBytes: _selectedPhotoBytes,
-              profilePhotoUrl: _profilePhotoUrl,
-              nameController: _nameController,
-              phoneController: _phoneController,
-              branchController: _branchController,
-              nicController: _nicController,
-              addressController: _addressController,
-              emergencyController: _emergencyController,
-              vehicleNumberController: _vehicleNumberController,
-              licenseController: _licenseController,
-              vehicleType: _vehicleType,
-              onVehicleTypeChanged: (value) =>
-                  setState(() => _vehicleType = value),
-              onPickPhoto: _pickProfilePhoto,
-              onSave: _saveProfile,
-            ),
-          ),
+      body: SafeArea(
+        top: false,
+        child: _ProfileSettingsContent(
+          formKey: _profileFormKey,
+          isLoading: _isProfileLoading,
+          selectedPhotoBytes: _selectedPhotoBytes,
+          profilePhotoUrl: _profilePhotoUrl,
+          nameController: _nameController,
+          phoneController: _phoneController,
+          branchController: _branchController,
+          nicController: _nicController,
+          addressController: _addressController,
+          emergencyController: _emergencyController,
+          vehicleNumberController: _vehicleNumberController,
+          licenseController: _licenseController,
+          vehicleType: _vehicleType,
+          onVehicleTypeChanged: (value) =>
+              setState(() => _vehicleType = value),
+          onPickPhoto: _pickProfilePhoto,
         ),
       ),
+      bottomNavigationBar: _isProfileLoading
+          ? null
+          : _SaveProfileBar(isSaving: _isProfileSaving, onSave: _saveProfile),
     );
   }
 }
 
-class _ProfileSettingsCard extends StatelessWidget {
+class _ProfileSettingsContent extends StatelessWidget {
   final GlobalKey<FormState> formKey;
   final bool isLoading;
-  final bool isSaving;
   final Uint8List? selectedPhotoBytes;
   final String? profilePhotoUrl;
   final TextEditingController nameController;
@@ -330,12 +326,10 @@ class _ProfileSettingsCard extends StatelessWidget {
   final String? vehicleType;
   final ValueChanged<String?> onVehicleTypeChanged;
   final VoidCallback onPickPhoto;
-  final VoidCallback onSave;
 
-  const _ProfileSettingsCard({
+  const _ProfileSettingsContent({
     required this.formKey,
     required this.isLoading,
-    required this.isSaving,
     required this.selectedPhotoBytes,
     required this.profilePhotoUrl,
     required this.nameController,
@@ -349,7 +343,112 @@ class _ProfileSettingsCard extends StatelessWidget {
     required this.vehicleType,
     required this.onVehicleTypeChanged,
     required this.onPickPhoto,
-    required this.onSave,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (isLoading) {
+      return const Center(
+        child: CircularProgressIndicator(color: _brandOrange),
+      );
+    }
+
+    return Form(
+      key: formKey,
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 104),
+        children: [
+          _ProfileHeader(
+            selectedPhotoBytes: selectedPhotoBytes,
+            profilePhotoUrl: profilePhotoUrl,
+            onPickPhoto: onPickPhoto,
+          ),
+          const SizedBox(height: 22),
+          _FormSection(
+            title: 'Personal',
+            children: [
+              _ProfileField(
+                controller: nameController,
+                label: 'Full Name',
+                validator: Validators.validateName,
+              ),
+              _ProfileField(
+                controller: branchController,
+                label: 'Branch',
+                validator: (value) =>
+                    Validators.validateRequired(value, 'Branch'),
+              ),
+              _ProfileField(
+                controller: nicController,
+                label: 'NIC Number',
+                validator: Validators.validateNIC,
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
+          _FormSection(
+            title: 'Contact',
+            children: [
+              _ProfileField(
+                controller: phoneController,
+                label: 'Phone Number',
+                keyboardType: TextInputType.phone,
+                validator: Validators.validatePhoneNumber,
+              ),
+              _ProfileField(
+                controller: addressController,
+                label: 'Home Address',
+                minLines: 2,
+                maxLines: 3,
+                validator: (value) =>
+                    Validators.validateRequired(value, 'Home Address'),
+              ),
+              _ProfileField(
+                controller: emergencyController,
+                label: 'Emergency Contact',
+                keyboardType: TextInputType.phone,
+                validator: Validators.validatePhoneNumber,
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
+          _FormSection(
+            title: 'Vehicle',
+            children: [
+              _VehicleTypeField(
+                vehicleType: vehicleType,
+                onChanged: onVehicleTypeChanged,
+              ),
+              _ProfileField(
+                controller: vehicleNumberController,
+                label: 'Vehicle Number',
+                validator: Validators.validateVehicleNumber,
+              ),
+              _ProfileField(
+                controller: licenseController,
+                label: 'Driving License Number',
+                validator: (value) => Validators.validateRequired(
+                  value,
+                  'Driving License Number',
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ProfileHeader extends StatelessWidget {
+  final Uint8List? selectedPhotoBytes;
+  final String? profilePhotoUrl;
+  final VoidCallback onPickPhoto;
+
+  const _ProfileHeader({
+    required this.selectedPhotoBytes,
+    required this.profilePhotoUrl,
+    required this.onPickPhoto,
   });
 
   @override
@@ -361,219 +460,95 @@ class _ProfileSettingsCard extends StatelessWidget {
         ? NetworkImage(photoUrl)
         : null;
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(24),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-        child: Container(
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.07),
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.25),
-                blurRadius: 24,
-                offset: const Offset(0, 8),
+    return Row(
+      children: [
+        Stack(
+          clipBehavior: Clip.none,
+          children: [
+            CircleAvatar(
+              radius: 34,
+              backgroundColor: _brandOrange.withValues(alpha: 0.14),
+              backgroundImage: avatarImage,
+              child: avatarImage == null
+                  ? const Icon(Icons.person, color: _brandOrange, size: 34)
+                  : null,
+            ),
+            Positioned(
+              right: -2,
+              bottom: -2,
+              child: Material(
+                color: _brandOrange,
+                shape: const CircleBorder(),
+                child: InkWell(
+                  customBorder: const CircleBorder(),
+                  onTap: onPickPhoto,
+                  child: const SizedBox(
+                    width: 30,
+                    height: 30,
+                    child: Icon(
+                      Icons.camera_alt_outlined,
+                      color: Colors.white,
+                      size: 16,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(width: 16),
+        const Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Rider Profile',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              SizedBox(height: 4),
+              Text(
+                'Keep your delivery contact and vehicle details current.',
+                style: TextStyle(color: _textMuted, fontSize: 13),
               ),
             ],
           ),
-          padding: const EdgeInsets.all(22),
-          child: isLoading
-              ? const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 28),
-                  child: Center(
-                    child: CircularProgressIndicator(color: Color(0xFFF97316)),
-                  ),
-                )
-              : Form(
-                  key: formKey,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Row(
-                        children: [
-                          Stack(
-                            children: [
-                              CircleAvatar(
-                                radius: 38,
-                                backgroundColor: const Color(
-                                  0xFFF97316,
-                                ).withValues(alpha: 0.16),
-                                backgroundImage: avatarImage,
-                                child: avatarImage == null
-                                    ? const Icon(
-                                        Icons.person,
-                                        color: Color(0xFFF97316),
-                                        size: 36,
-                                      )
-                                    : null,
-                              ),
-                              Positioned(
-                                right: 0,
-                                bottom: 0,
-                                child: GestureDetector(
-                                  onTap: onPickPhoto,
-                                  child: Container(
-                                    width: 30,
-                                    height: 30,
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xFFF97316),
-                                      shape: BoxShape.circle,
-                                      border: Border.all(
-                                        color: const Color(0xFF222222),
-                                        width: 2,
-                                      ),
-                                    ),
-                                    child: const Icon(
-                                      Icons.camera_alt_outlined,
-                                      color: Colors.white,
-                                      size: 16,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(width: 16),
-                          const Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Rider Profile',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                ),
-                                SizedBox(height: 4),
-                                Text(
-                                  'Update contact, emergency, and vehicle details.',
-                                  style: TextStyle(
-                                    color: Color(0xFFAAAAAA),
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 20),
-                      _ProfileField(
-                        controller: nameController,
-                        label: 'Full Name',
-                        icon: Icons.person_outline,
-                        validator: Validators.validateName,
-                      ),
-                      const SizedBox(height: 12),
-                      _ProfileField(
-                        controller: phoneController,
-                        label: 'Phone Number',
-                        icon: Icons.phone_outlined,
-                        keyboardType: TextInputType.phone,
-                        validator: Validators.validatePhoneNumber,
-                      ),
-                      const SizedBox(height: 12),
-                      _ProfileField(
-                        controller: branchController,
-                        label: 'Branch',
-                        icon: Icons.store_outlined,
-                        validator: (value) =>
-                            Validators.validateRequired(value, 'Branch'),
-                      ),
-                      const SizedBox(height: 12),
-                      _ProfileField(
-                        controller: nicController,
-                        label: 'NIC Number',
-                        icon: Icons.credit_card_outlined,
-                        validator: Validators.validateNIC,
-                      ),
-                      const SizedBox(height: 12),
-                      _ProfileField(
-                        controller: addressController,
-                        label: 'Home Address',
-                        icon: Icons.home_outlined,
-                        minLines: 2,
-                        maxLines: 3,
-                        validator: (value) =>
-                            Validators.validateRequired(value, 'Home Address'),
-                      ),
-                      const SizedBox(height: 12),
-                      _ProfileField(
-                        controller: emergencyController,
-                        label: 'Emergency Contact',
-                        icon: Icons.emergency_outlined,
-                        keyboardType: TextInputType.phone,
-                        validator: Validators.validatePhoneNumber,
-                      ),
-                      const SizedBox(height: 18),
-                      Divider(color: Colors.white.withValues(alpha: 0.08)),
-                      const SizedBox(height: 18),
-                      DropdownButtonFormField<String>(
-                        initialValue: vehicleType,
-                        dropdownColor: const Color(0xFF232323),
-                        style: const TextStyle(color: Colors.white),
-                        decoration: _profileInputDecoration(
-                          label: 'Vehicle Type',
-                          icon: Icons.directions_bike_outlined,
-                        ),
-                        items: const [
-                          DropdownMenuItem(value: 'Bike', child: Text('Bike')),
-                          DropdownMenuItem(
-                            value: 'Three Wheeler',
-                            child: Text('Three Wheeler'),
-                          ),
-                          DropdownMenuItem(value: 'Van', child: Text('Van')),
-                        ],
-                        onChanged: onVehicleTypeChanged,
-                        validator: (value) =>
-                            value == null ? 'Please select vehicle type' : null,
-                      ),
-                      const SizedBox(height: 12),
-                      _ProfileField(
-                        controller: vehicleNumberController,
-                        label: 'Vehicle Number',
-                        icon: Icons.pin_outlined,
-                        validator: Validators.validateVehicleNumber,
-                      ),
-                      const SizedBox(height: 12),
-                      _ProfileField(
-                        controller: licenseController,
-                        label: 'Driving License Number',
-                        icon: Icons.article_outlined,
-                        validator: (value) => Validators.validateRequired(
-                          value,
-                          'Driving License Number',
-                        ),
-                      ),
-                      const SizedBox(height: 18),
-                      SizedBox(
-                        height: 52,
-                        child: ElevatedButton.icon(
-                          onPressed: isSaving ? null : onSave,
-                          icon: isSaving
-                              ? const SizedBox(
-                                  width: 18,
-                                  height: 18,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: Colors.white,
-                                  ),
-                                )
-                              : const Icon(Icons.save_outlined),
-                          label: Text(
-                            isSaving ? 'Saving...' : 'Save Profile Settings',
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
         ),
-      ),
+      ],
+    );
+  }
+}
+
+class _FormSection extends StatelessWidget {
+  final String title;
+  final List<Widget> children;
+
+  const _FormSection({required this.title, required this.children});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(left: 2, bottom: 8),
+          child: Text(
+            title,
+            style: const TextStyle(
+              color: _textMuted,
+              fontSize: 12,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+        _SurfacePanel(
+          padding: const EdgeInsets.fromLTRB(14, 14, 14, 2),
+          child: Column(children: children),
+        ),
+      ],
     );
   }
 }
@@ -581,7 +556,6 @@ class _ProfileSettingsCard extends StatelessWidget {
 class _ProfileField extends StatelessWidget {
   final TextEditingController controller;
   final String label;
-  final IconData icon;
   final TextInputType? keyboardType;
   final int? minLines;
   final int? maxLines;
@@ -590,7 +564,6 @@ class _ProfileField extends StatelessWidget {
   const _ProfileField({
     required this.controller,
     required this.label,
-    required this.icon,
     this.keyboardType,
     this.minLines,
     this.maxLines,
@@ -599,45 +572,192 @@ class _ProfileField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return TextFormField(
-      controller: controller,
-      keyboardType: keyboardType,
-      minLines: minLines,
-      maxLines: maxLines ?? 1,
-      style: const TextStyle(color: Colors.white),
-      decoration: _profileInputDecoration(label: label, icon: icon),
-      validator: validator,
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _FieldLabel(label),
+          const SizedBox(height: 6),
+          TextFormField(
+            controller: controller,
+            keyboardType: keyboardType,
+            minLines: minLines,
+            maxLines: maxLines ?? 1,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+            ),
+            decoration: _profileInputDecoration(hint: label),
+            validator: validator,
+          ),
+        ],
+      ),
     );
   }
 }
 
-InputDecoration _profileInputDecoration({
-  required String label,
-  required IconData icon,
-}) {
+class _VehicleTypeField extends StatelessWidget {
+  final String? vehicleType;
+  final ValueChanged<String?> onChanged;
+
+  const _VehicleTypeField({
+    required this.vehicleType,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const _FieldLabel('Vehicle Type'),
+          const SizedBox(height: 6),
+          DropdownButtonFormField<String>(
+            initialValue: vehicleType,
+            dropdownColor: _surface,
+            iconEnabledColor: _textMuted,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+            ),
+            decoration: _profileInputDecoration(hint: 'Vehicle Type'),
+            items: const [
+              DropdownMenuItem(value: 'Bike', child: Text('Bike')),
+              DropdownMenuItem(
+                value: 'Three Wheeler',
+                child: Text('Three Wheeler'),
+              ),
+              DropdownMenuItem(value: 'Van', child: Text('Van')),
+            ],
+            onChanged: onChanged,
+            validator: (value) =>
+                value == null ? 'Please select vehicle type' : null,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FieldLabel extends StatelessWidget {
+  final String label;
+
+  const _FieldLabel(this.label);
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      label,
+      style: const TextStyle(
+        color: _textMuted,
+        fontSize: 12,
+        fontWeight: FontWeight.w700,
+      ),
+    );
+  }
+}
+
+class _SaveProfileBar extends StatelessWidget {
+  final bool isSaving;
+  final VoidCallback onSave;
+
+  const _SaveProfileBar({required this.isSaving, required this.onSave});
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      top: false,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(20, 10, 20, 14),
+        decoration: const BoxDecoration(
+          color: _appBg,
+          border: Border(top: BorderSide(color: _border)),
+        ),
+        child: SizedBox(
+          height: 50,
+          child: FilledButton.icon(
+            onPressed: isSaving ? null : onSave,
+            icon: isSaving
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : const Icon(Icons.save_outlined),
+            label: Text(isSaving ? 'Saving...' : 'Save Changes'),
+            style: FilledButton.styleFrom(
+              backgroundColor: _brandOrange,
+              foregroundColor: Colors.white,
+              disabledBackgroundColor: _brandOrange.withValues(alpha: 0.45),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+              textStyle: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SurfacePanel extends StatelessWidget {
+  final Widget child;
+  final EdgeInsetsGeometry padding;
+
+  const _SurfacePanel({
+    required this.child,
+    required this.padding,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: _surface,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: _border),
+      ),
+      padding: padding,
+      child: child,
+    );
+  }
+}
+
+InputDecoration _profileInputDecoration({required String hint}) {
   return InputDecoration(
-    labelText: label,
-    prefixIcon: Icon(icon, color: const Color(0xFFF97316), size: 20),
+    hintText: hint,
     filled: true,
-    fillColor: Colors.white.withValues(alpha: 0.06),
+    fillColor: _surfaceSoft,
     enabledBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(16),
-      borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
+      borderRadius: BorderRadius.circular(8),
+      borderSide: const BorderSide(color: _border),
     ),
     focusedBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(16),
-      borderSide: const BorderSide(color: Color(0xFFF97316), width: 1.8),
+      borderRadius: BorderRadius.circular(8),
+      borderSide: const BorderSide(color: _brandOrange, width: 1.4),
     ),
     errorBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(16),
+      borderRadius: BorderRadius.circular(8),
       borderSide: const BorderSide(color: Colors.redAccent),
     ),
     focusedErrorBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(16),
-      borderSide: const BorderSide(color: Colors.redAccent, width: 1.8),
+      borderRadius: BorderRadius.circular(8),
+      borderSide: const BorderSide(color: Colors.redAccent, width: 1.4),
     ),
-    labelStyle: const TextStyle(color: Color(0xFFBBBBBB)),
+    hintStyle: const TextStyle(color: Color(0xFF777777)),
     errorStyle: const TextStyle(color: Colors.redAccent),
-    contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
   );
 }
