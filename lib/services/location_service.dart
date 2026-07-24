@@ -61,42 +61,60 @@ class LocationService extends ChangeNotifier {
 
     _isTracking = true;
     _trackingRiderId = riderId;
-    _statusMessage = 'Getting location...';
+    _statusMessage = 'Getting current location...';
     notifyListeners();
 
-    const settings = LocationSettings(
+    const initialSettings = LocationSettings(
+      accuracy: LocationAccuracy.high,
+      timeLimit: Duration(seconds: 18),
+    );
+    const streamSettings = LocationSettings(
       accuracy: LocationAccuracy.high,
       distanceFilter: 10,
     );
 
-    _positionStream = Geolocator.getPositionStream(locationSettings: settings)
-        .listen(
-          (position) async {
-            _currentPosition = position;
-            _statusMessage =
-                '${position.latitude.toStringAsFixed(5)}, '
-                '${position.longitude.toStringAsFixed(5)}';
-            notifyListeners();
-            await _publishPosition(position);
-          },
-          onError: (e) {
-            _isTracking = false;
-            _statusMessage = 'Location error: $e';
-            notifyListeners();
-          },
-        );
+    try {
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: initialSettings,
+      );
+      await _handlePosition(position);
+    } on TimeoutException {
+      final lastKnown = await Geolocator.getLastKnownPosition();
+      if (lastKnown == null) {
+        await _resetTrackingState();
+        _statusMessage =
+            'Could not get GPS location. Move near a window and try again.';
+        notifyListeners();
+        return _statusMessage;
+      }
+      await _handlePosition(lastKnown);
+      _statusMessage =
+          'Using last known location. Waiting for live GPS update...';
+      notifyListeners();
+    } catch (e) {
+      await _resetTrackingState();
+      _statusMessage = 'Location error: $e';
+      notifyListeners();
+      return _statusMessage;
+    }
+
+    _positionStream = Geolocator.getPositionStream(
+      locationSettings: streamSettings,
+    ).listen(
+      (position) async => _handlePosition(position),
+      onError: (e) {
+        _isTracking = false;
+        _statusMessage = 'Location error: $e';
+        notifyListeners();
+      },
+    );
 
     return null;
   }
 
   Future<void> stopTracking() async {
     final riderId = _trackingRiderId ?? _supabaseService.currentUser?.id;
-    await _positionStream?.cancel();
-    _positionStream = null;
-    _isTracking = false;
-    _trackingRiderId = null;
-    _currentPosition = null;
-    _statusMessage = 'GPS tracking is off';
+    await _resetTrackingState();
     notifyListeners();
 
     if (riderId != null) {
@@ -107,6 +125,24 @@ class LocationService extends ChangeNotifier {
         notifyListeners();
       }
     }
+  }
+
+  Future<void> _resetTrackingState() async {
+    await _positionStream?.cancel();
+    _positionStream = null;
+    _isTracking = false;
+    _trackingRiderId = null;
+    _currentPosition = null;
+    _statusMessage = 'GPS tracking is off';
+  }
+
+  Future<void> _handlePosition(Position position) async {
+    _currentPosition = position;
+    _statusMessage =
+        '${position.latitude.toStringAsFixed(5)}, '
+        '${position.longitude.toStringAsFixed(5)}';
+    notifyListeners();
+    await _publishPosition(position);
   }
 
   Future<void> _publishPosition(Position position) async {

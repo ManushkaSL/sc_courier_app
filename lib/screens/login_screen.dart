@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:lottie/lottie.dart';
 
 import '../services/supabase_service.dart';
 import '../utils/validators.dart';
@@ -112,6 +113,12 @@ class _LoginScreenState extends State<LoginScreen> {
           child: ListView(
             padding: const EdgeInsets.fromLTRB(20, 24, 20, 24),
             children: [
+              Lottie.asset(
+                'assets/Courier.json',
+                height: 180,
+                fit: BoxFit.contain,
+              ),
+              const SizedBox(height: 10),
               const _AuthHeader(
                 title: 'Welcome Back',
                 subtitle: 'Sign in to manage your deliveries.',
@@ -205,37 +212,23 @@ class _AuthHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        Container(
-          width: 56,
-          height: 56,
-          decoration: BoxDecoration(
-            color: _brandOrange.withValues(alpha: 0.12),
-            borderRadius: BorderRadius.circular(8),
+        Text(
+          title,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 24,
+            fontWeight: FontWeight.w900,
           ),
-          child: const Icon(Icons.delivery_dining, color: _brandOrange),
         ),
-        const SizedBox(width: 14),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 24,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                subtitle,
-                style: const TextStyle(color: _textMuted, fontSize: 13),
-              ),
-            ],
-          ),
+        const SizedBox(height: 4),
+        Text(
+          subtitle,
+          textAlign: TextAlign.center,
+          style: const TextStyle(color: _textMuted, fontSize: 13),
         ),
       ],
     );
