@@ -82,7 +82,10 @@ class SupabaseService {
     required String email,
     required String password,
   }) async {
-    final response = await _client.auth.signUp(email: email, password: password);
+    final response = await _client.auth.signUp(
+      email: email,
+      password: password,
+    );
     await _cacheAuthEmail(email);
     return response;
   }
@@ -296,17 +299,19 @@ class SupabaseService {
           (updates['original_email'] as String?) ??
           currentUser?.email,
     });
-    final updateCandidates = _mergeRiderLookupCandidates([
-      _candidateFromValue('user_id', updates['original_user_id']),
-      ..._riderLookupCandidates(
-        userId,
-        email:
-            (updates['original_email'] as String?) ??
-            (updates['email'] as String?) ??
-            currentUser?.email,
-      ),
-      _candidateFromValue('NIC', updates['original_NIC']),
-    ].whereType<MapEntry<String, String>>().toList());
+    final updateCandidates = _mergeRiderLookupCandidates(
+      [
+        _candidateFromValue('user_id', updates['original_user_id']),
+        ..._riderLookupCandidates(
+          userId,
+          email:
+              (updates['original_email'] as String?) ??
+              (updates['email'] as String?) ??
+              currentUser?.email,
+        ),
+        _candidateFromValue('NIC', updates['original_NIC']),
+      ].whereType<MapEntry<String, String>>().toList(),
+    );
 
     final updatedProfile = await _updateExistingRiderByCandidates(
       updateCandidates,
@@ -336,25 +341,54 @@ class SupabaseService {
 
   // Deliveries
   Future<List<Map<String, dynamic>>> getDeliveries({String? status}) async {
-    final uid = currentUser?.id;
-    var query = _client.from('deliveries').select();
+    final user = await currentUserOrRestored();
+    final uid = user?.id;
+    if (uid == null || uid.trim().isEmpty) return [];
 
-    if (uid != null) {
-      query = query.eq('rider_id', uid);
-    }
-    if (status != null) {
-      query = query.eq('status', status);
+    final profile = await getUserProfile(uid);
+    final candidates = _deliveryLookupCandidates(uid, profile);
+    if (candidates.isEmpty) return [];
+
+    final deliveriesByKey = <String, Map<String, dynamic>>{};
+    Object? lastError;
+
+    for (final candidate in candidates) {
+      try {
+        var query = _client
+            .from('deliveries')
+            .select()
+            .eq(candidate.key, candidate.value);
+        if (status != null) query = query.eq('status', status);
+
+        final List<dynamic> response = await query;
+        for (final row in response) {
+          if (row is! Map) continue;
+          final delivery = Map<String, dynamic>.from(row);
+          deliveriesByKey[_deliveryDedupKey(delivery)] = delivery;
+        }
+      } catch (error) {
+        if (_isMissingTable(error, 'deliveries')) return [];
+        if (_isMissingFilterColumnOnTable(error, 'deliveries', candidate.key)) {
+          lastError = error;
+          continue;
+        }
+        if (_isInvalidFilterValue(error)) {
+          lastError = error;
+          continue;
+        }
+        rethrow;
+      }
     }
 
-    try {
-      final response = await query.order('created_at', ascending: false);
-      return response
-          .map((delivery) => Map<String, dynamic>.from(delivery))
-          .toList();
-    } catch (error) {
-      if (_isMissingTable(error, 'deliveries')) return [];
-      rethrow;
+    if (deliveriesByKey.isEmpty &&
+        lastError != null &&
+        candidates.length == 1) {
+      throw lastError;
     }
+
+    final deliveries = deliveriesByKey.values.toList();
+    deliveries.sort(_compareDeliveriesNewestFirst);
+    return deliveries;
   }
 
   Future<Map<String, dynamic>> createDelivery({
@@ -373,11 +407,7 @@ class SupabaseService {
     final delivery = <String, dynamic>{
       'rider_id': currentUser?.id,
       'pickup_address': pickupAddress,
-      if (pickupLatitude != null) 'pickup_latitude': pickupLatitude,
-      if (pickupLongitude != null) 'pickup_longitude': pickupLongitude,
       'delivery_address': deliveryAddress,
-      if (deliveryLatitude != null) 'delivery_latitude': deliveryLatitude,
-      if (deliveryLongitude != null) 'delivery_longitude': deliveryLongitude,
       'distance': distance,
       'price': price,
       'package_description': packageDescription,
@@ -387,6 +417,16 @@ class SupabaseService {
       'live_tracking_enabled': true,
       'created_at_iso': DateTime.now().toIso8601String(),
     };
+    if (pickupLatitude != null) delivery['pickup_latitude'] = pickupLatitude;
+    if (pickupLongitude != null) {
+      delivery['pickup_longitude'] = pickupLongitude;
+    }
+    if (deliveryLatitude != null) {
+      delivery['delivery_latitude'] = deliveryLatitude;
+    }
+    if (deliveryLongitude != null) {
+      delivery['delivery_longitude'] = deliveryLongitude;
+    }
 
     final dynamic inserted;
     try {
@@ -540,6 +580,8 @@ class SupabaseService {
     Map<String, dynamic> location,
     String updatedAt,
   ) async {
+    if (riderId.trim().isEmpty) return;
+
     const liveDeliveryStatuses = [
       'pending',
       'accepted',
@@ -548,16 +590,7 @@ class SupabaseService {
       'out_for_delivery',
     ];
 
-    final List<dynamic> deliveries;
-    try {
-      deliveries = await _client
-          .from('deliveries')
-          .select('id,status')
-          .eq('rider_id', riderId);
-    } catch (error) {
-      if (_isMissingTable(error, 'deliveries')) return;
-      rethrow;
-    }
+    final deliveries = await getDeliveries();
 
     for (final delivery in deliveries) {
       if (!liveDeliveryStatuses.contains(delivery['status'])) continue;
@@ -615,24 +648,23 @@ class SupabaseService {
     setAll(['phone_number', 'Phone_Number'], ['phone_number', 'Phone_Number']);
     setAll(['branch', 'Branch'], ['branch', 'Branch']);
     setAll(['home_address', 'Address'], ['home_address', 'Address']);
-    setAll([
-      'emergency_contact',
-      'Emergency_Contact',
-    ], ['emergency_contact', 'Emergency_Contact']);
+    setAll(
+      ['emergency_contact', 'Emergency_Contact'],
+      ['emergency_contact', 'Emergency_Contact'],
+    );
     setAll(['vehicle_type', 'Vehicle_Type'], ['vehicle_type', 'Vehicle_Type']);
-    setAll([
-      'vehicle_number',
-      'Vehicle_No',
-      'Vehicle_Number',
-    ], ['vehicle_number', 'Vehicle_No', 'Vehicle_Number']);
-    setAll([
-      'driving_license',
-      'Driver_Licence_No',
-    ], ['driving_license', 'Driver_Licence_No']);
-    setAll([
-      'profile_photo_url',
-      'Profile_Photo_Url',
-    ], ['profile_photo_url', 'Profile_Photo_Url']);
+    setAll(
+      ['vehicle_number', 'Vehicle_No', 'Vehicle_Number'],
+      ['vehicle_number', 'Vehicle_No', 'Vehicle_Number'],
+    );
+    setAll(
+      ['driving_license', 'Driver_Licence_No'],
+      ['driving_license', 'Driver_Licence_No'],
+    );
+    setAll(
+      ['profile_photo_url', 'Profile_Photo_Url'],
+      ['profile_photo_url', 'Profile_Photo_Url'],
+    );
     setAll(['profile_completed_at'], ['profile_completed_at']);
     setAll(['updated_at'], ['updated_at']);
 
@@ -667,14 +699,8 @@ class SupabaseService {
       'Vehicle_No',
       'vehicle_number',
     ]);
-    setFirst('Driver_Licence_No', [
-      'Driver_Licence_No',
-      'driving_license',
-    ]);
-    setFirst('Profile_Photo_Url', [
-      'Profile_Photo_Url',
-      'profile_photo_url',
-    ]);
+    setFirst('Driver_Licence_No', ['Driver_Licence_No', 'driving_license']);
+    setFirst('Profile_Photo_Url', ['Profile_Photo_Url', 'profile_photo_url']);
 
     final email = payload['email'];
     if (email is String) payload['email'] = email.toLowerCase();
@@ -857,6 +883,122 @@ class SupabaseService {
         _candidateFromValue('NIC', profile['NIC']);
   }
 
+  List<MapEntry<String, String>> _deliveryLookupCandidates(
+    String userId,
+    Map<String, dynamic>? profile,
+  ) {
+    final identityValues = <String>[];
+    final emailValues = <String>[];
+    final nicValues = <String>[];
+
+    void addValue(List<String> values, Object? value, {bool lower = false}) {
+      if (value is! String || value.trim().isEmpty) return;
+      final normalized = lower ? value.trim().toLowerCase() : value.trim();
+      if (!values.contains(normalized)) values.add(normalized);
+    }
+
+    addValue(identityValues, userId);
+    addValue(emailValues, currentUser?.email, lower: true);
+
+    if (profile != null) {
+      for (final key in const [
+        'id',
+        'user_id',
+        'firebase_uid',
+        'uid',
+        'rider_id',
+      ]) {
+        addValue(identityValues, profile[key]);
+      }
+      for (final key in const ['email', 'Email']) {
+        addValue(emailValues, profile[key], lower: true);
+      }
+      for (final key in const ['NIC', 'nic', 'nic_number']) {
+        addValue(nicValues, profile[key]);
+      }
+    }
+
+    final candidates = <MapEntry<String, String>>[];
+    void addCandidates(List<String> columns, List<String> values) {
+      for (final column in columns) {
+        for (final value in values) {
+          candidates.add(MapEntry(column, value));
+        }
+      }
+    }
+
+    addCandidates(const [
+      'rider_id',
+      'riderId',
+      'rider_uid',
+      'riderUid',
+      'rider_user_id',
+      'riderUserId',
+      'firebase_uid',
+      'assigned_rider_id',
+      'assignedRiderId',
+      'assigned_to',
+      'assignedTo',
+    ], identityValues);
+    addCandidates(const [
+      'rider_email',
+      'riderEmail',
+      'assigned_rider_email',
+      'assignedRiderEmail',
+      'email',
+    ], emailValues);
+    addCandidates(const [
+      'rider_nic',
+      'riderNic',
+      'assigned_rider_nic',
+      'assignedRiderNic',
+      'NIC',
+      'nic',
+    ], nicValues);
+
+    return _mergeRiderLookupCandidates(candidates);
+  }
+
+  String _deliveryDedupKey(Map<String, dynamic> delivery) {
+    for (final key in const ['id', 'tracking_code', 'parcel_id']) {
+      final value = delivery[key];
+      if (value is String && value.trim().isNotEmpty) {
+        return '$key:${value.trim()}';
+      }
+    }
+    return jsonEncode(delivery);
+  }
+
+  int _compareDeliveriesNewestFirst(
+    Map<String, dynamic> a,
+    Map<String, dynamic> b,
+  ) {
+    final aDate = _deliveryDate(a);
+    final bDate = _deliveryDate(b);
+    if (aDate == null && bDate == null) return 0;
+    if (aDate == null) return 1;
+    if (bDate == null) return -1;
+    return bDate.compareTo(aDate);
+  }
+
+  DateTime? _deliveryDate(Map<String, dynamic> delivery) {
+    for (final key in const [
+      'created_at',
+      'createdAt',
+      'created_at_iso',
+      'updated_at',
+      'updatedAt',
+    ]) {
+      final value = delivery[key];
+      if (value is DateTime) return value;
+      if (value is String) {
+        final parsed = DateTime.tryParse(value);
+        if (parsed != null) return parsed;
+      }
+    }
+    return null;
+  }
+
   Future<void> _insertRider(Map<String, dynamic> data) async {
     var payload = _riderPayloadForSchema(data);
     if (!payload.containsKey('NIC')) {
@@ -939,9 +1081,7 @@ class SupabaseService {
     if (raw == null) return null;
 
     try {
-      return Map<String, dynamic>.from(
-        jsonDecode(raw) as Map<String, dynamic>,
-      );
+      return Map<String, dynamic>.from(jsonDecode(raw) as Map<String, dynamic>);
     } catch (_) {
       await prefs.remove(_profileCacheKey(userId));
       return null;
@@ -977,7 +1117,10 @@ class SupabaseService {
   MapEntry<String, String>? _candidateFromValue(String column, Object? value) {
     if (value is! String || value.trim().isEmpty) return null;
     final trimmed = value.trim();
-    return MapEntry(column, column == 'email' ? trimmed.toLowerCase() : trimmed);
+    return MapEntry(
+      column,
+      column == 'email' ? trimmed.toLowerCase() : trimmed,
+    );
   }
 
   List<MapEntry<String, String>> _mergeRiderLookupCandidates(
@@ -1008,15 +1151,28 @@ class SupabaseService {
   }
 
   bool _isMissingFilterColumn(Object error, String column) {
+    return _isMissingFilterColumnOnTable(error, riderTable, column);
+  }
+
+  bool _isMissingFilterColumnOnTable(
+    Object error,
+    String table,
+    String column,
+  ) {
     if (error is! PostgrestException || error.code != '42703') {
       return false;
     }
 
     final message = error.message.toLowerCase();
-    final table = riderTable.toLowerCase();
+    final tableName = table.toLowerCase();
     final filterColumn = column.toLowerCase();
-    return message.contains('column $table.$filterColumn does not exist') ||
-        message.contains('column "$table"."$filterColumn" does not exist');
+    return message.contains('column $tableName.$filterColumn does not exist') ||
+        message.contains('column "$tableName"."$filterColumn" does not exist');
+  }
+
+  bool _isInvalidFilterValue(Object error) {
+    return error is PostgrestException &&
+        (error.code == '22P02' || error.code == '42883');
   }
 
   bool _isDuplicateKey(Object error) {

@@ -3,6 +3,7 @@ import 'login_screen.dart';
 import 'settings_screen.dart';
 import 'extend_delivery_screen.dart';
 import 'gps_tracking_screen.dart';
+import 'delivery_details_screen.dart';
 import '../services/location_service.dart';
 import '../services/supabase_service.dart';
 import '../services/rider_service.dart';
@@ -115,6 +116,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
     Navigator.pushNamed(context, GpsTrackingScreen.routeName);
   }
 
+  Future<void> _openDeliveryDetails(Map<String, dynamic> delivery) async {
+    await Navigator.pushNamed(
+      context,
+      DeliveryDetailsScreen.routeName,
+      arguments: delivery,
+    );
+    if (mounted) await _loadData();
+  }
+
   @override
   Widget build(BuildContext context) {
     final isTracking = _locationService.isTracking;
@@ -193,6 +203,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 _ActiveDeliveriesPanel(
                   isLoading: _isLoading,
                   deliveries: _deliveries,
+                  onDeliveryTap: _openDeliveryDetails,
                 ),
                 const SizedBox(height: 18),
                 _AddDeliveryPanel(onTap: _openAddDelivery),
@@ -300,7 +311,9 @@ class _GpsStatusTile extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      isTracking ? 'GPS tracking active' : 'GPS tracking is off',
+                      isTracking
+                          ? 'GPS tracking active'
+                          : 'GPS tracking is off',
                       style: TextStyle(
                         color: color,
                         fontSize: 14,
@@ -462,10 +475,12 @@ class _SectionHeader extends StatelessWidget {
 class _ActiveDeliveriesPanel extends StatelessWidget {
   final bool isLoading;
   final List<Map<String, dynamic>> deliveries;
+  final ValueChanged<Map<String, dynamic>> onDeliveryTap;
 
   const _ActiveDeliveriesPanel({
     required this.isLoading,
     required this.deliveries,
+    required this.onDeliveryTap,
   });
 
   @override
@@ -483,7 +498,10 @@ class _ActiveDeliveriesPanel extends StatelessWidget {
               )
             : deliveries.isEmpty
             ? const _EmptyDeliveries()
-            : _DeliveriesTable(deliveries: deliveries),
+            : _DeliveriesList(
+                deliveries: deliveries,
+                onDeliveryTap: onDeliveryTap,
+              ),
       ),
     );
   }
@@ -517,48 +535,167 @@ class _EmptyDeliveries extends StatelessWidget {
   }
 }
 
-class _DeliveriesTable extends StatelessWidget {
+class _DeliveriesList extends StatelessWidget {
   final List<Map<String, dynamic>> deliveries;
+  final ValueChanged<Map<String, dynamic>> onDeliveryTap;
 
-  const _DeliveriesTable({required this.deliveries});
+  const _DeliveriesList({
+    required this.deliveries,
+    required this.onDeliveryTap,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Theme(
-        data: Theme.of(context).copyWith(
-          dividerColor: Colors.white.withValues(alpha: 0.08),
-        ),
-        child: DataTable(
-          headingTextStyle: const TextStyle(
-            color: _textMuted,
-            fontWeight: FontWeight.w700,
-            fontSize: 12,
+    return Column(
+      children: [
+        for (var index = 0; index < deliveries.length; index++) ...[
+          _DeliveryListRow(
+            delivery: deliveries[index],
+            onTap: () => onDeliveryTap(deliveries[index]),
           ),
-          dataTextStyle: const TextStyle(color: Colors.white, fontSize: 13),
-          columnSpacing: 20,
-          horizontalMargin: 0,
-          columns: const [
-            DataColumn(label: Text('ID')),
-            DataColumn(label: Text('Location')),
-            DataColumn(label: Text('Status')),
-          ],
-          rows: deliveries
-              .map(
-                (delivery) => DataRow(
-                  cells: [
-                    DataCell(
-                      Text(delivery['id']?.toString().substring(0, 8) ?? 'N/A'),
+          if (index != deliveries.length - 1)
+            Divider(color: Colors.white.withValues(alpha: 0.08), height: 18),
+        ],
+      ],
+    );
+  }
+}
+
+class _DeliveryListRow extends StatelessWidget {
+  final Map<String, dynamic> delivery;
+  final VoidCallback onTap;
+
+  const _DeliveryListRow({required this.delivery, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final code =
+        _textValue(delivery, const ['tracking_code', 'parcel_id', 'id']) ??
+        'N/A';
+    final pickup = _textValue(delivery, const [
+      'pickup_address',
+      'pickLocation',
+      'pick_location',
+    ]);
+    final dropoff = _textValue(delivery, const [
+      'delivery_address',
+      'dropLocation',
+      'drop_location',
+    ]);
+    final recipient = _textValue(delivery, const [
+      'recipient_name',
+      'receiver_name',
+      'customer_name',
+    ]);
+    final price = _priceValue(delivery);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: _brandOrange.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(
+                  Icons.local_shipping_outlined,
+                  color: _brandOrange,
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            _shortCode(code),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        _DeliveryStatus(status: delivery['status']),
+                      ],
                     ),
-                    DataCell(Text(delivery['delivery_address'] ?? 'Unknown')),
-                    DataCell(_DeliveryStatus(status: delivery['status'])),
+                    const SizedBox(height: 8),
+                    _CompactDeliveryLine(
+                      icon: Icons.inventory_2_outlined,
+                      value: pickup ?? 'Pickup not set',
+                    ),
+                    const SizedBox(height: 5),
+                    _CompactDeliveryLine(
+                      icon: Icons.location_on_outlined,
+                      value: dropoff ?? 'Dropoff not set',
+                    ),
+                    if (recipient != null || price != null) ...[
+                      const SizedBox(height: 7),
+                      Text(
+                        [?recipient, ?price].join(' | '),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: _textMuted,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
                   ],
                 ),
-              )
-              .toList(),
+              ),
+              const SizedBox(width: 8),
+              const Padding(
+                padding: EdgeInsets.only(top: 8),
+                child: Icon(Icons.chevron_right, color: Colors.white38),
+              ),
+            ],
+          ),
         ),
       ),
+    );
+  }
+}
+
+class _CompactDeliveryLine extends StatelessWidget {
+  final IconData icon;
+  final String value;
+
+  const _CompactDeliveryLine({required this.icon, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, color: _textMuted, size: 15),
+        const SizedBox(width: 7),
+        Expanded(
+          child: Text(
+            value,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: Colors.white70, fontSize: 12),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -581,7 +718,7 @@ class _DeliveryStatus extends StatelessWidget {
         borderRadius: BorderRadius.circular(6),
       ),
       child: Text(
-        text,
+        _formatStatus(text),
         style: TextStyle(
           color: color,
           fontSize: 11,
@@ -590,6 +727,35 @@ class _DeliveryStatus extends StatelessWidget {
       ),
     );
   }
+}
+
+String? _textValue(Map<String, dynamic> data, List<String> keys) {
+  for (final key in keys) {
+    final value = data[key];
+    if (value == null) continue;
+    final text = value.toString().trim();
+    if (text.isNotEmpty) return text;
+  }
+  return null;
+}
+
+String _shortCode(String code) {
+  if (code.length <= 12) return code;
+  return code.substring(0, 12);
+}
+
+String? _priceValue(Map<String, dynamic> delivery) {
+  final value = _textValue(delivery, const ['price', 'amount', 'delivery_fee']);
+  if (value == null) return null;
+  final number = num.tryParse(value);
+  if (number == null) return value;
+  return 'LKR ${number.toStringAsFixed(2)}';
+}
+
+String _formatStatus(String status) {
+  final text = status.replaceAll('_', ' ').trim();
+  if (text.isEmpty) return 'Unknown';
+  return text[0].toUpperCase() + text.substring(1);
 }
 
 class _AddDeliveryPanel extends StatelessWidget {

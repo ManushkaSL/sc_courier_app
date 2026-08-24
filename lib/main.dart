@@ -7,6 +7,7 @@ import 'screens/settings_screen.dart';
 import 'screens/profile_settings_screen.dart';
 import 'screens/extend_delivery_screen.dart';
 import 'screens/gps_tracking_screen.dart';
+import 'screens/delivery_details_screen.dart';
 import 'services/supabase_service.dart';
 import 'services/push_notification_service.dart';
 
@@ -213,6 +214,8 @@ class MyApp extends StatelessWidget {
         ExtendDeliveryScreen.routeName: (context) =>
             const ExtendDeliveryScreen(),
         GpsTrackingScreen.routeName: (context) => const GpsTrackingScreen(),
+        DeliveryDetailsScreen.routeName: (context) =>
+            const DeliveryDetailsScreen(),
       },
     );
   }
