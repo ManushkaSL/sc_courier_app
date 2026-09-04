@@ -43,3 +43,12 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Stale duplicate app copy and agent worktrees (not submodules)
+/sc_courier/
+/sc_courier.worktrees/
+
+# Stray root-level media and artifacts
+/logo_animation.mp4
+/logo animation1.mp4
+/git

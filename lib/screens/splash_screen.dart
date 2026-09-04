@@ -1,7 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 import 'dart:developer' as developer;
 import 'login_screen.dart';
+import 'dashboard_screen.dart';
+import '../services/supabase_service.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -15,17 +19,19 @@ class SplashScreen extends StatefulWidget {
 class _SplashScreenState extends State<SplashScreen> {
   late final VideoPlayerController _videoController;
   bool _hasNavigated = false;
+  Timer? _fallbackTimer;
+  final _supabaseService = SupabaseService();
 
   @override
   void initState() {
     super.initState();
     _videoController = VideoPlayerController.asset('assets/logo_animation.mp4');
     _initializeVideo();
-    // Fallback timeout - navigate to login after 10 seconds if video fails
-    Future.delayed(const Duration(seconds: 10), () {
+    // Fallback timeout - navigate after 10 seconds if video fails
+    _fallbackTimer = Timer(const Duration(seconds: 10), () {
       if (mounted && !_hasNavigated) {
-        developer.log('Video initialization timeout - navigating to login');
-        _goToLogin();
+        developer.log('Video initialization timeout - navigating');
+        _navigateToNextScreen();
       }
     });
   }
@@ -46,7 +52,7 @@ class _SplashScreenState extends State<SplashScreen> {
       }
     } catch (e) {
       developer.log('Video initialization error: $e');
-      _goToLogin();
+      _navigateToNextScreen();
     }
   }
 
@@ -57,20 +63,41 @@ class _SplashScreenState extends State<SplashScreen> {
     final position = _videoController.value.position;
 
     if (duration > Duration.zero && position >= duration) {
-      _goToLogin();
+      _navigateToNextScreen();
     }
   }
 
-  void _goToLogin() {
+  void _navigateToNextScreen() {
     if (_hasNavigated || !mounted) return;
     _hasNavigated = true;
-    Navigator.pushReplacementNamed(context, LoginScreen.routeName);
+
+    _fallbackTimer?.cancel();
+    _videoController.removeListener(_onVideoProgress);
+
+    final isAuthenticated = _supabaseService.isAuthenticated;
+    final nextScreen = isAuthenticated
+        ? DashboardScreen.routeName
+        : LoginScreen.routeName;
+
+    // _onVideoProgress can fire from inside a frame; navigating there runs
+    // route lifecycle callbacks while the Navigator is locked.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      Navigator.pushReplacementNamed(context, nextScreen);
+    });
   }
 
   @override
   void dispose() {
-    _videoController.removeListener(_onVideoProgress);
-    _videoController.dispose();
+    // Anything that throws here runs inside Navigator._flushHistoryUpdates,
+    // which would leave the Navigator permanently locked.
+    _fallbackTimer?.cancel();
+    try {
+      _videoController.removeListener(_onVideoProgress);
+      _videoController.dispose();
+    } catch (e) {
+      developer.log('Video controller dispose error: $e');
+    }
     super.dispose();
   }
 

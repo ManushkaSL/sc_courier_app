@@ -1,6 +1,15 @@
-import 'dart:ui';
 import 'package:flutter/material.dart';
+
 import '../services/location_service.dart';
+import '../services/supabase_service.dart';
+import 'login_screen.dart';
+import 'profile_settings_screen.dart';
+
+const _brandOrange = Color(0xFFF97316);
+const _appBg = Color(0xFF151515);
+const _surface = Color(0xFF222222);
+const _border = Color(0xFF343434);
+const _textMuted = Color(0xFFB8B8B8);
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -11,471 +20,183 @@ class SettingsScreen extends StatefulWidget {
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
-class _SettingsScreenState extends State<SettingsScreen>
-    with SingleTickerProviderStateMixin {
+class _SettingsScreenState extends State<SettingsScreen> {
   final _locationService = LocationService();
-  late final AnimationController _pulseCtrl;
+  final _supabaseService = SupabaseService();
+  bool _profileChanged = false;
+  bool _handledRouteArguments = false;
 
   @override
-  void initState() {
-    super.initState();
-    _locationService.addListener(_onLocationChanged);
-    _pulseCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1200),
-    )..repeat(reverse: true);
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_handledRouteArguments) return;
+    _handledRouteArguments = true;
+
+    final arguments = ModalRoute.of(context)?.settings.arguments;
+    if (arguments is! Map || arguments['profileSaved'] != true) return;
+
+    _profileChanged = true;
+    final photoUploadSkipped = arguments['photoUploadSkipped'] == true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _showProfileSavedMessage(photoUploadSkipped: photoUploadSkipped);
+    });
   }
 
-  @override
-  void dispose() {
-    _locationService.removeListener(_onLocationChanged);
-    _pulseCtrl.dispose();
-    super.dispose();
-  }
-
-  void _onLocationChanged() {
-    if (mounted) setState(() {});
-  }
-
-  Future<void> _toggleTracking() async {
+  Future<void> _logout() async {
     if (_locationService.isTracking) {
       await _locationService.stopTracking();
-    } else {
-      final error = await _locationService.startTracking();
-      if (error != null && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(error),
-            action: SnackBarAction(
-              label: 'Settings',
-              onPressed: _locationService.openAppSettings,
-            ),
-          ),
-        );
-      }
     }
+    await _supabaseService.signOut();
+    if (!mounted) return;
+    Navigator.pushNamedAndRemoveUntil(
+      context,
+      LoginScreen.routeName,
+      (_) => false,
+    );
+  }
+
+  Future<void> _openProfileSettings() async {
+    final updatedProfile = await Navigator.pushNamed(
+      context,
+      ProfileSettingsScreen.routeName,
+    );
+    if (!mounted || updatedProfile == null) return;
+
+    final photoUploadSkipped =
+        updatedProfile is Map && updatedProfile['photoUploadSkipped'] == true;
+    setState(() => _profileChanged = true);
+    _showProfileSavedMessage(photoUploadSkipped: photoUploadSkipped);
+  }
+
+  void _showProfileSavedMessage({required bool photoUploadSkipped}) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          photoUploadSkipped
+              ? 'Profile saved. Photo upload skipped because storage is not set up.'
+              : 'Profile settings saved successfully.',
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final isTracking = _locationService.isTracking;
-    final position = _locationService.currentPosition;
-    final statusMsg = _locationService.statusMessage;
-
-    final trackingColor = isTracking ? const Color(0xFF4ADE80) : Colors.white38;
-    final trackingLabel = isTracking ? 'Tracking Active' : 'Tracking Inactive';
-
     return Scaffold(
-      extendBodyBehindAppBar: true,
+      backgroundColor: _appBg,
       appBar: AppBar(
-        backgroundColor: Colors.transparent,
+        backgroundColor: _appBg,
+        surfaceTintColor: Colors.transparent,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white),
-          onPressed: () => Navigator.pop(context),
+          onPressed: () => Navigator.pop(context, _profileChanged),
         ),
         title: const Text(
           'Settings',
           style: TextStyle(
             color: Colors.white,
-            fontWeight: FontWeight.w700,
+            fontWeight: FontWeight.w800,
             fontSize: 18,
           ),
         ),
       ),
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFF1A1A1A), Color(0xFF212121), Color(0xFF1A1A1A)],
-          ),
-        ),
-        child: SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
+      body: SafeArea(
+        top: false,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+          children: [
+            const _SettingsSectionTitle('Account'),
+            _SettingsGroup(
               children: [
-                // ─── GPS Tracking Card ───────────────────────────────────
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(24),
-                  child: BackdropFilter(
-                    filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.07),
-                        borderRadius: BorderRadius.circular(24),
-                        border: Border.all(
-                          color: isTracking
-                              ? const Color(0xFF4ADE80).withValues(alpha: 0.35)
-                              : Colors.white.withValues(alpha: 0.12),
-                        ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: isTracking
-                                ? const Color(
-                                    0xFF4ADE80,
-                                  ).withValues(alpha: 0.12)
-                                : Colors.black.withValues(alpha: 0.25),
-                            blurRadius: 24,
-                            offset: const Offset(0, 8),
-                          ),
-                        ],
-                      ),
-                      padding: const EdgeInsets.all(22),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          // Header row
-                          Row(
-                            children: [
-                              // Animated pulse indicator
-                              AnimatedBuilder(
-                                animation: _pulseCtrl,
-                                builder: (context, child) => Container(
-                                  width: 44,
-                                  height: 44,
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    color: trackingColor.withValues(
-                                      alpha: isTracking
-                                          ? 0.1 + 0.1 * _pulseCtrl.value
-                                          : 0.08,
-                                    ),
-                                    border: Border.all(
-                                      color: trackingColor.withValues(
-                                        alpha: isTracking
-                                            ? 0.5 + 0.3 * _pulseCtrl.value
-                                            : 0.25,
-                                      ),
-                                      width: 1.5,
-                                    ),
-                                  ),
-                                  child: Icon(
-                                    isTracking
-                                        ? Icons.gps_fixed
-                                        : Icons.gps_off,
-                                    color: trackingColor,
-                                    size: 22,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 14),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    const Text(
-                                      'GPS Location Tracking',
-                                      style: TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 3),
-                                    Text(
-                                      trackingLabel,
-                                      style: TextStyle(
-                                        color: trackingColor,
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              // Toggle switch
-                              GestureDetector(
-                                onTap: _toggleTracking,
-                                child: AnimatedContainer(
-                                  duration: const Duration(milliseconds: 250),
-                                  width: 52,
-                                  height: 30,
-                                  decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(15),
-                                    color: isTracking
-                                        ? const Color(0xFF4ADE80)
-                                        : Colors.white.withValues(alpha: 0.15),
-                                    border: Border.all(
-                                      color: isTracking
-                                          ? const Color(0xFF4ADE80)
-                                          : Colors.white.withValues(alpha: 0.2),
-                                    ),
-                                  ),
-                                  child: AnimatedAlign(
-                                    duration: const Duration(milliseconds: 250),
-                                    curve: Curves.easeInOut,
-                                    alignment: isTracking
-                                        ? Alignment.centerRight
-                                        : Alignment.centerLeft,
-                                    child: Container(
-                                      margin: const EdgeInsets.all(3),
-                                      width: 24,
-                                      height: 24,
-                                      decoration: const BoxDecoration(
-                                        color: Colors.white,
-                                        shape: BoxShape.circle,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 20),
-                          // Status / coordinates area
-                          Container(
-                            padding: const EdgeInsets.all(14),
-                            decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.04),
-                              borderRadius: BorderRadius.circular(14),
-                              border: Border.all(
-                                color: Colors.white.withValues(alpha: 0.08),
-                              ),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                _InfoRow(
-                                  icon: Icons.info_outline,
-                                  label: 'Status',
-                                  value: statusMsg,
-                                  valueColor: isTracking
-                                      ? const Color(0xFF4ADE80)
-                                      : Colors.white54,
-                                ),
-                                if (position != null) ...[
-                                  const SizedBox(height: 10),
-                                  _InfoRow(
-                                    icon: Icons.my_location,
-                                    label: 'Latitude',
-                                    value: position.latitude.toStringAsFixed(6),
-                                  ),
-                                  const SizedBox(height: 10),
-                                  _InfoRow(
-                                    icon: Icons.my_location,
-                                    label: 'Longitude',
-                                    value: position.longitude.toStringAsFixed(
-                                      6,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 10),
-                                  _InfoRow(
-                                    icon: Icons.speed,
-                                    label: 'Speed',
-                                    value:
-                                        '${(position.speed * 3.6).toStringAsFixed(1)} km/h',
-                                  ),
-                                  const SizedBox(height: 10),
-                                  _InfoRow(
-                                    icon:
-                                        Icons.precision_manufacturing_outlined,
-                                    label: 'Accuracy',
-                                    value:
-                                        '±${position.accuracy.toStringAsFixed(1)} m',
-                                  ),
-                                ],
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          // Big action button
-                          _GpsActionButton(
-                            isTracking: isTracking,
-                            onTap: _toggleTracking,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 18),
-                // ─── Device Settings shortcut ────────────────────────────
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(18),
-                  child: BackdropFilter(
-                    filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.05),
-                        borderRadius: BorderRadius.circular(18),
-                        border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.09),
-                        ),
-                      ),
-                      child: Column(
-                        children: [
-                          _SettingsTile(
-                            icon: Icons.settings_outlined,
-                            label: 'App Location Settings',
-                            subtitle: 'Manage location permission',
-                            onTap: _locationService.openAppSettings,
-                          ),
-                          Divider(
-                            height: 1,
-                            color: Colors.white.withValues(alpha: 0.07),
-                            indent: 58,
-                          ),
-                          _SettingsTile(
-                            icon: Icons.location_on_outlined,
-                            label: 'Device Location Settings',
-                            subtitle: 'Open device GPS settings',
-                            onTap: _locationService.openLocationSettings,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
+                _SettingsTile(
+                  icon: Icons.person_outline,
+                  label: 'Profile',
+                  subtitle: 'Name, phone, photo, and vehicle details',
+                  onTap: _openProfileSettings,
                 ),
               ],
             ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ─── Helper widgets ───────────────────────────────────────────────────────────
-
-class _InfoRow extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final String value;
-  final Color? valueColor;
-
-  const _InfoRow({
-    required this.icon,
-    required this.label,
-    required this.value,
-    this.valueColor,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Icon(icon, color: const Color(0xFFF97316), size: 16),
-        const SizedBox(width: 8),
-        Text(
-          '$label:',
-          style: const TextStyle(color: Colors.white54, fontSize: 12),
-        ),
-        const SizedBox(width: 6),
-        Expanded(
-          child: Text(
-            value,
-            textAlign: TextAlign.right,
-            style: TextStyle(
-              color: valueColor ?? Colors.white,
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _GpsActionButton extends StatefulWidget {
-  final bool isTracking;
-  final VoidCallback onTap;
-
-  const _GpsActionButton({required this.isTracking, required this.onTap});
-
-  @override
-  State<_GpsActionButton> createState() => _GpsActionButtonState();
-}
-
-class _GpsActionButtonState extends State<_GpsActionButton>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl;
-  late final Animation<double> _scale;
-
-  @override
-  void initState() {
-    super.initState();
-    _ctrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 100),
-      reverseDuration: const Duration(milliseconds: 180),
-      lowerBound: 0,
-      upperBound: 1,
-    );
-    _scale = Tween<double>(
-      begin: 1.0,
-      end: 0.96,
-    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut));
-  }
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final isTracking = widget.isTracking;
-    return GestureDetector(
-      onTapDown: (_) => _ctrl.forward(),
-      onTapUp: (_) => _ctrl.reverse(),
-      onTapCancel: () => _ctrl.reverse(),
-      onTap: widget.onTap,
-      child: AnimatedBuilder(
-        animation: _scale,
-        builder: (context, child) =>
-            Transform.scale(scale: _scale.value, child: child),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 300),
-          height: 52,
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: isTracking
-                  ? [const Color(0xFF16A34A), const Color(0xFF4ADE80)]
-                  : [const Color(0xFFFF7A00), const Color(0xFFF97316)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            borderRadius: BorderRadius.circular(16),
-            boxShadow: [
-              BoxShadow(
-                color:
-                    (isTracking
-                            ? const Color(0xFF4ADE80)
-                            : const Color(0xFFF97316))
-                        .withValues(alpha: 0.4),
-                blurRadius: 18,
-                offset: const Offset(0, 6),
-              ),
-            ],
-          ),
-          alignment: Alignment.center,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                isTracking ? Icons.stop_circle_outlined : Icons.gps_fixed,
-                color: Colors.white,
-                size: 20,
-              ),
-              const SizedBox(width: 10),
-              Text(
-                isTracking ? 'Stop Tracking' : 'Start Tracking',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.4,
+            const SizedBox(height: 22),
+            const _SettingsSectionTitle('Permissions'),
+            _SettingsGroup(
+              children: [
+                _SettingsTile(
+                  icon: Icons.tune_outlined,
+                  label: 'App Location Permission',
+                  subtitle: 'Manage this app permission',
+                  onTap: _locationService.openAppSettings,
                 ),
-              ),
-            ],
-          ),
+                const _SettingsDivider(),
+                _SettingsTile(
+                  icon: Icons.location_on_outlined,
+                  label: 'Device GPS',
+                  subtitle: 'Open device location settings',
+                  onTap: _locationService.openLocationSettings,
+                ),
+              ],
+            ),
+            const SizedBox(height: 22),
+            const _SettingsSectionTitle('Account Access'),
+            _SettingsGroup(
+              children: [
+                _SettingsTile(
+                  icon: Icons.logout,
+                  label: 'Logout',
+                  subtitle: 'Sign out from this rider account',
+                  iconColor: Colors.redAccent,
+                  onTap: _logout,
+                ),
+              ],
+            ),
+          ],
         ),
       ),
     );
+  }
+}
+
+class _SettingsSectionTitle extends StatelessWidget {
+  final String label;
+
+  const _SettingsSectionTitle(this.label);
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 2, bottom: 8),
+      child: Text(
+        label,
+        style: const TextStyle(
+          color: _textMuted,
+          fontSize: 12,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    );
+  }
+}
+
+class _SettingsGroup extends StatelessWidget {
+  final List<Widget> children;
+
+  const _SettingsGroup({required this.children});
+
+  @override
+  Widget build(BuildContext context) {
+    return _SurfacePanel(
+      padding: EdgeInsets.zero,
+      child: Column(children: children),
+    );
+  }
+}
+
+class _SettingsDivider extends StatelessWidget {
+  const _SettingsDivider();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Divider(height: 1, color: Colors.white10, indent: 58);
   }
 }
 
@@ -483,63 +204,90 @@ class _SettingsTile extends StatelessWidget {
   final IconData icon;
   final String label;
   final String subtitle;
+  final Color iconColor;
   final VoidCallback onTap;
 
   const _SettingsTile({
     required this.icon,
     required this.label,
     required this.subtitle,
+    this.iconColor = _brandOrange,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(18),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: const Color(0xFFF97316).withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(10),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+          child: Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: iconColor.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(icon, color: iconColor, size: 20),
               ),
-              child: Icon(icon, color: const Color(0xFFF97316), size: 20),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    label,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
-                  ),
-                  Text(
-                    subtitle,
-                    style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.45),
-                      fontSize: 12,
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: _textMuted, fontSize: 12),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-            Icon(
-              Icons.chevron_right,
-              color: Colors.white.withValues(alpha: 0.3),
-              size: 20,
-            ),
-          ],
+              const Icon(Icons.chevron_right, color: Colors.white54, size: 20),
+            ],
+          ),
         ),
       ),
+    );
+  }
+}
+
+class _SurfacePanel extends StatelessWidget {
+  final Widget child;
+  final EdgeInsetsGeometry padding;
+
+  const _SurfacePanel({
+    required this.child,
+    required this.padding,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: _surface,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: _border),
+      ),
+      padding: padding,
+      child: child,
     );
   }
 }

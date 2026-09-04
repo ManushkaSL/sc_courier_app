@@ -1,0 +1,35 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function hasRole(role) {
+      return signedIn() && request.auth.token.role == role;
+    }
+
+    function isAdminOrStaff() {
+      return hasRole('admin') || hasRole('staff');
+    }
+
+    match /NIC_images/{fileName} {
+      allow read: if signedIn();
+      allow create, update: if signedIn()
+        && fileName.matches(request.auth.uid + '_.*')
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+      allow delete: if isAdminOrStaff();
+    }
+
+    match /rider_profiles/{riderId}/{fileName} {
+      allow read: if signedIn();
+      allow create, update: if signedIn()
+        && riderId == request.auth.uid
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+      allow delete: if signedIn() && riderId == request.auth.uid || isAdminOrStaff();
+    }
+  }
+}
