@@ -31,6 +31,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   late List<Map<String, dynamic>> _deliveries = [];
   late Map<String, dynamic> _stats = {'completed': 0, 'pending': 0};
   bool _isLoading = true;
+  bool _isRedirectingToLogin = false;
 
   @override
   void initState() {
@@ -47,13 +48,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Future<void> _loadData() async {
     try {
-      final currentUser = _supabaseService.currentUser;
+      final currentUser = await _supabaseService.currentUserOrRestored();
+      if (!mounted) return;
+
       if (currentUser == null) {
-        Navigator.pushNamedAndRemoveUntil(
-          context,
-          LoginScreen.routeName,
-          (_) => false,
-        );
+        _redirectToLogin();
         return;
       }
 
@@ -78,6 +77,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ).showSnackBar(SnackBar(content: Text('Error loading data: $e')));
       }
     }
+  }
+
+  void _redirectToLogin() {
+    if (_isRedirectingToLogin) return;
+    _isRedirectingToLogin = true;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      Navigator.pushNamedAndRemoveUntil(
+        context,
+        LoginScreen.routeName,
+        (_) => false,
+      );
+    });
   }
 
   void _onLocationChanged() {

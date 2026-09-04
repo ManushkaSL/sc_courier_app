@@ -39,7 +39,9 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-  void _handleLogin() async {
+  Future<void> _handleLogin() async {
+    if (_isLoading) return;
+
     setState(() => _errorMessage = null);
 
     if (!_formKey.currentState!.validate()) {
@@ -52,13 +54,6 @@ class _LoginScreenState extends State<LoginScreen> {
       await _supabaseService.signIn(
         email: _emailController.text.trim(),
         password: _passwordController.text,
-      );
-
-      if (!mounted) return;
-      Navigator.pushNamedAndRemoveUntil(
-        context,
-        DashboardScreen.routeName,
-        (_) => false,
       );
     } catch (e) {
       String errorMessage = e.toString().replaceAll('Exception: ', '');
@@ -73,11 +68,20 @@ class _LoginScreenState extends State<LoginScreen> {
         errorMessage = 'Please confirm your email before logging in.';
       }
 
+      if (!mounted) return;
       setState(() {
         _errorMessage = errorMessage;
         _isLoading = false;
       });
+      return;
     }
+
+    if (!mounted) return;
+    Navigator.pushNamedAndRemoveUntil(
+      context,
+      DashboardScreen.routeName,
+      (_) => false,
+    );
   }
 
   @override
@@ -171,7 +175,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       SizedBox(
                         height: 50,
                         child: FilledButton(
-                          onPressed: _handleLogin,
+                          onPressed: _isLoading ? null : _handleLogin,
                           style: _primaryButtonStyle(),
                           child: const Text('Login'),
                         ),

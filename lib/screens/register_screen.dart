@@ -155,13 +155,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
       };
 
       await RiderService().saveRider(riderPayload);
-
-      if (!mounted) return;
-      Navigator.pushNamedAndRemoveUntil(
-        context,
-        DashboardScreen.routeName,
-        (_) => false,
-      );
     } catch (e) {
       final authUser = _supabaseService.currentUser;
       if (createdUser != null && authUser?.id == createdUser.id) {
@@ -183,7 +176,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
           ),
         );
       }
+      return;
     }
+
+    // Kept outside the try/catch: a framework assertion raised by the Navigator
+    // must surface, not be reported as a registration failure.
+    if (!mounted) return;
+    Navigator.pushNamedAndRemoveUntil(
+      context,
+      DashboardScreen.routeName,
+      (_) => false,
+    );
   }
 
   String _registrationErrorMessage(Object error) {
