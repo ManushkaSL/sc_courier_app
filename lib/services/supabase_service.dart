@@ -92,6 +92,37 @@ class SupabaseService {
 
   Future<void> signOut() => _client.auth.signOut();
 
+  /// True when the project requires email confirmation and the account created
+  /// by [signUp] is not usable for password sign-in yet.
+  bool signUpNeedsEmailConfirmation(AuthResponse response) =>
+      response.session == null && response.user?.emailConfirmedAt == null;
+
+  Future<void> resendConfirmationEmail(String email) async {
+    await _client.auth.resend(
+      type: OtpType.signup,
+      email: email.trim().toLowerCase(),
+    );
+  }
+
+  Future<void> sendPasswordReset(String email) async {
+    await _client.auth.resetPasswordForEmail(email.trim().toLowerCase());
+  }
+
+  /// Whether a rider row already exists for [email]. Used to tell a wrong
+  /// password apart from an account that was registered but never confirmed.
+  Future<bool> riderExistsForEmail(String email) async {
+    final trimmed = email.trim().toLowerCase();
+    if (trimmed.isEmpty) return false;
+    try {
+      final profile = await _selectRiderByCandidates([
+        MapEntry('email', trimmed),
+      ]);
+      return profile != null;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<void> deleteCurrentUser() async {
     // Supabase user deletion requires a service-role key and should be done by
     // an Edge Function/admin backend. The client signs out to avoid a bad state.

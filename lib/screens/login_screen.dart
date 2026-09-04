@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:lottie/lottie.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../services/supabase_service.dart';
 import '../utils/validators.dart';
@@ -31,6 +32,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _supabaseService = SupabaseService();
   final _formKey = GlobalKey<FormState>();
   String? _errorMessage;
+  bool _showResendConfirmation = false;
 
   @override
   void dispose() {
@@ -42,7 +44,10 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _handleLogin() async {
     if (_isLoading) return;
 
-    setState(() => _errorMessage = null);
+    setState(() {
+      _errorMessage = null;
+      _showResendConfirmation = false;
+    });
 
     if (!_formKey.currentState!.validate()) {
       return;
@@ -50,27 +55,20 @@ class _LoginScreenState extends State<LoginScreen> {
 
     setState(() => _isLoading = true);
 
+    final email = _emailController.text.trim();
+
     try {
       await _supabaseService.signIn(
-        email: _emailController.text.trim(),
+        email: email,
         password: _passwordController.text,
       );
     } catch (e) {
-      String errorMessage = e.toString().replaceAll('Exception: ', '');
-
-      if (errorMessage.contains('rate limit')) {
-        errorMessage =
-            'Too many login attempts. Please wait a few minutes and try again.';
-      } else if (errorMessage.contains('Invalid login credentials') ||
-          errorMessage.contains('invalid credentials')) {
-        errorMessage = 'Invalid email or password. Please try again.';
-      } else if (errorMessage.contains('Email not confirmed')) {
-        errorMessage = 'Please confirm your email before logging in.';
-      }
+      final resolved = await _resolveLoginError(e, email);
 
       if (!mounted) return;
       setState(() {
-        _errorMessage = errorMessage;
+        _errorMessage = resolved.message;
+        _showResendConfirmation = resolved.offerResend;
         _isLoading = false;
       });
       return;
@@ -82,6 +80,120 @@ class _LoginScreenState extends State<LoginScreen> {
       DashboardScreen.routeName,
       (_) => false,
     );
+  }
+
+  /// Supabase returns a generic `invalid_credentials` error both for a wrong
+  /// password and (on projects with email confirmation on) for an account that
+  /// was created but never confirmed, so check the rider record before deciding
+  /// which message to show.
+  Future<_LoginError> _resolveLoginError(Object error, String email) async {
+    if (error is AuthException) {
+      final code = error.code ?? '';
+      final message = error.message.toLowerCase();
+
+      if (code == 'email_not_confirmed' ||
+          message.contains('email not confirmed')) {
+        return const _LoginError(
+          'Your email address is not confirmed yet. Open the confirmation link '
+          'we emailed you, then log in again.',
+          offerResend: true,
+        );
+      }
+
+      if (code == 'over_request_rate_limit' ||
+          code == 'over_email_send_rate_limit' ||
+          message.contains('rate limit')) {
+        return const _LoginError(
+          'Too many login attempts. Please wait a few minutes and try again.',
+        );
+      }
+
+      if (code == 'invalid_credentials' ||
+          message.contains('invalid login credentials') ||
+          message.contains('invalid credentials')) {
+        final hasRiderRecord = await _supabaseService.riderExistsForEmail(
+          email,
+        );
+        if (hasRiderRecord) {
+          return const _LoginError(
+            'This account exists but is not confirmed yet, so login is blocked. '
+            'Confirm your email address, then log in again.',
+            offerResend: true,
+          );
+        }
+        return const _LoginError(
+          'Invalid email or password. Please try again.',
+        );
+      }
+
+      return _LoginError(error.message);
+    }
+
+    final raw = error.toString().replaceAll('Exception: ', '');
+    if (raw.contains('rate limit')) {
+      return const _LoginError(
+        'Too many login attempts. Please wait a few minutes and try again.',
+      );
+    }
+    return _LoginError(raw);
+  }
+
+  Future<void> _handleForgotPassword() async {
+    final email = _emailController.text.trim();
+    if (email.isEmpty) {
+      setState(() => _errorMessage = 'Enter your email address first.');
+      return;
+    }
+
+    setState(() => _isLoading = true);
+    try {
+      await _supabaseService.sendPasswordReset(email);
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Password reset link sent to $email.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      final message = e is AuthException
+          ? e.message
+          : e.toString().replaceAll('Exception: ', '');
+      setState(() {
+        _isLoading = false;
+        _errorMessage = 'Could not send the reset email: $message';
+      });
+    }
+  }
+
+  Future<void> _handleResendConfirmation() async {
+    final email = _emailController.text.trim();
+    if (email.isEmpty) {
+      setState(() => _errorMessage = 'Enter your email address first.');
+      return;
+    }
+
+    setState(() => _isLoading = true);
+    try {
+      await _supabaseService.resendConfirmationEmail(email);
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _errorMessage = null;
+        _showResendConfirmation = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Confirmation email sent to $email.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      final message = e is AuthException
+          ? e.message
+          : e.toString().replaceAll('Exception: ', '');
+      setState(() {
+        _isLoading = false;
+        _errorMessage = 'Could not resend the confirmation email: $message';
+      });
+    }
   }
 
   @override
@@ -137,7 +249,19 @@ class _LoginScreenState extends State<LoginScreen> {
                     children: [
                       if (_errorMessage != null) ...[
                         _ErrorBanner(message: _errorMessage!),
-                        const SizedBox(height: 14),
+                        const SizedBox(height: 8),
+                      ],
+                      if (_showResendConfirmation) ...[
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton(
+                            onPressed: _isLoading
+                                ? null
+                                : _handleResendConfirmation,
+                            child: const Text('Resend confirmation email'),
+                          ),
+                        ),
+                        const SizedBox(height: 6),
                       ],
                       _AuthField(
                         controller: _emailController,
@@ -167,7 +291,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       Align(
                         alignment: Alignment.centerRight,
                         child: TextButton(
-                          onPressed: () {},
+                          onPressed: _isLoading ? null : _handleForgotPassword,
                           child: const Text('Forgot password?'),
                         ),
                       ),
@@ -367,4 +491,11 @@ InputDecoration _authInputDecoration({
     errorStyle: const TextStyle(color: Colors.redAccent),
     contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
   );
+}
+
+class _LoginError {
+  final String message;
+  final bool offerResend;
+
+  const _LoginError(this.message, {this.offerResend = false});
 }

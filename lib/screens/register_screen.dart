@@ -8,6 +8,7 @@ import '../services/supabase_service.dart';
 import '../utils/validators.dart';
 import '../widgets/loading_overlay.dart';
 import 'dashboard_screen.dart';
+import 'login_screen.dart';
 
 const _brandOrange = Color(0xFFF97316);
 const _appBg = Color(0xFF151515);
@@ -104,6 +105,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     setState(() => _isLoading = true);
 
     User? createdUser;
+    var needsEmailConfirmation = false;
 
     try {
       final cred = await _supabaseService
@@ -113,6 +115,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
           )
           .timeout(const Duration(seconds: 30));
 
+      needsEmailConfirmation = _supabaseService.signUpNeedsEmailConfirmation(
+        cred,
+      );
       final userId = cred.user?.id;
       if (userId == null) {
         throw Exception('Could not create Supabase user.');
@@ -182,6 +187,29 @@ class _RegisterScreenState extends State<RegisterScreen> {
     // Kept outside the try/catch: a framework assertion raised by the Navigator
     // must surface, not be reported as a registration failure.
     if (!mounted) return;
+
+    if (needsEmailConfirmation) {
+      // Sign-up succeeded but the project requires email confirmation, so there
+      // is no session: send the rider to login with a clear next step instead
+      // of a dashboard that cannot load their data.
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Account created. Confirm your email (${_emailController.text.trim()}) '
+            'using the link we sent, then log in.',
+          ),
+          duration: const Duration(seconds: 8),
+        ),
+      );
+      Navigator.pushNamedAndRemoveUntil(
+        context,
+        LoginScreen.routeName,
+        (_) => false,
+      );
+      return;
+    }
+
     Navigator.pushNamedAndRemoveUntil(
       context,
       DashboardScreen.routeName,
