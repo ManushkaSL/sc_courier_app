@@ -53,7 +53,7 @@ class _GpsTrackingScreenState extends State<GpsTrackingScreen> {
 
   Future<void> _loadDeliveries() async {
     try {
-      final deliveries = await _supabaseService.getDeliveries();
+      final deliveries = await _supabaseService.getAssignedDeliveries();
       if (!mounted) return;
       setState(() {
         _deliveries = deliveries.where(_isLiveDelivery).toList();

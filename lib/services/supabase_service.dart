@@ -371,55 +371,131 @@ class SupabaseService {
   }
 
   // Deliveries
-  Future<List<Map<String, dynamic>>> getDeliveries({String? status}) async {
+  //
+  // Assignment chain: rider."NIC" -> trip.rider_nic, then trip.trip_id ->
+  // delivery.trip_id. Rows come back normalized onto the canonical keys the
+  // screens read (id / status / pickup_address / delivery_address) with the
+  // raw columns left in place alongside them.
+  static const deliveryTable = 'delivery';
+  static const tripTable = 'trip';
+
+  Future<String?> _currentRiderNic() async {
     final user = await currentUserOrRestored();
     final uid = user?.id;
-    if (uid == null || uid.trim().isEmpty) return [];
+    if (uid == null || uid.trim().isEmpty) return null;
 
     final profile = await getUserProfile(uid);
-    final candidates = _deliveryLookupCandidates(uid, profile);
-    if (candidates.isEmpty) return [];
+    if (profile == null) return null;
+    return _rowText(profile, const ['NIC', 'nic', 'nic_number']);
+  }
 
-    final deliveriesByKey = <String, Map<String, dynamic>>{};
-    Object? lastError;
+  Future<List<Map<String, dynamic>>> getAssignedTrips() async {
+    final nic = await _currentRiderNic();
+    if (nic == null) return [];
 
-    for (final candidate in candidates) {
-      try {
-        var query = _client
-            .from('deliveries')
-            .select()
-            .eq(candidate.key, candidate.value);
-        if (status != null) query = query.eq('status', status);
+    try {
+      final List<dynamic> response = await _client
+          .from(tripTable)
+          .select()
+          .eq('rider_nic', nic);
+      return [
+        for (final row in response)
+          if (row is Map) Map<String, dynamic>.from(row),
+      ];
+    } catch (error) {
+      if (_isMissingTable(error, tripTable)) return [];
+      rethrow;
+    }
+  }
 
-        final List<dynamic> response = await query;
-        for (final row in response) {
-          if (row is! Map) continue;
-          final delivery = Map<String, dynamic>.from(row);
-          deliveriesByKey[_deliveryDedupKey(delivery)] = delivery;
-        }
-      } catch (error) {
-        if (_isMissingTable(error, 'deliveries')) return [];
-        if (_isMissingFilterColumnOnTable(error, 'deliveries', candidate.key)) {
-          lastError = error;
-          continue;
-        }
-        if (_isInvalidFilterValue(error)) {
-          lastError = error;
-          continue;
-        }
-        rethrow;
-      }
+  /// Every delivery assigned to the signed-in rider through one of their trips.
+  Future<List<Map<String, dynamic>>> getAssignedDeliveries({
+    String? status,
+  }) async {
+    final trips = await getAssignedTrips();
+    if (trips.isEmpty) return [];
+
+    final tripsById = <String, Map<String, dynamic>>{};
+    final tripIds = <dynamic>[];
+    for (final trip in trips) {
+      final id = trip['trip_id'];
+      if (id == null) continue;
+      tripsById[id.toString()] = trip;
+      tripIds.add(id);
+    }
+    if (tripIds.isEmpty) return [];
+
+    final List<dynamic> response;
+    try {
+      var query = _client
+          .from(deliveryTable)
+          .select()
+          .inFilter('trip_id', tripIds);
+      if (status != null) query = query.eq('delivery_status', status);
+      response = await query;
+    } catch (error) {
+      if (_isMissingTable(error, deliveryTable)) return [];
+      rethrow;
     }
 
-    if (deliveriesByKey.isEmpty &&
-        lastError != null &&
-        candidates.length == 1) {
-      throw lastError;
+    final deliveries = <Map<String, dynamic>>[];
+    for (final row in response) {
+      if (row is! Map) continue;
+      final delivery = _normalizeDelivery(Map<String, dynamic>.from(row));
+      final trip = tripsById[delivery['trip_id']?.toString()];
+      if (trip != null) delivery['trip'] = trip;
+      deliveries.add(delivery);
     }
 
-    final deliveries = deliveriesByKey.values.toList();
     deliveries.sort(_compareDeliveriesNewestFirst);
     return deliveries;
+  }
+
+  /// Deliveries for the signed-in rider. Assignment only ever arrives through a
+  /// trip, so this is the trip-joined lookup.
+  Future<List<Map<String, dynamic>>> getDeliveries({String? status}) {
+    return getAssignedDeliveries(status: status);
+  }
+
+  /// Maps `delivery` columns onto the keys the screens read.
+  Map<String, dynamic> _normalizeDelivery(Map<String, dynamic> row) {
+    final delivery = Map<String, dynamic>.from(row);
+
+    final id = _rowText(row, const ['del_id', 'id']);
+    if (id != null) {
+      delivery['id'] = id;
+      delivery.putIfAbsent('tracking_code', () => id);
+      delivery.putIfAbsent('parcel_id', () => id);
+    }
+
+    delivery['status'] =
+        _rowText(row, const ['delivery_status', 'status']) ?? 'pending';
+
+    final pickup = _rowText(row, const [
+      'pick_location',
+      'pickup_address',
+      'pickLocation',
+    ]);
+    if (pickup != null) delivery['pickup_address'] = pickup;
+
+    final dropoff = _rowText(row, const [
+      'drop_location',
+      'delivery_address',
+      'dropLocation',
+    ]);
+    if (dropoff != null) delivery['delivery_address'] = dropoff;
+
+    return delivery;
+  }
+
+  String? _rowText(Map<String, dynamic> row, List<String> keys) {
+    for (final key in keys) {
+      final value = row[key];
+      if (value == null) continue;
+      final text = value.toString().trim();
+      if (text.isNotEmpty) return text;
+    }
+    return null;
   }
 
   Future<Map<String, dynamic>> createDelivery({
@@ -435,71 +511,54 @@ class SupabaseService {
     double? deliveryLatitude,
     double? deliveryLongitude,
   }) async {
+    // A delivery reaches the rider through a trip, so a new one is attached to
+    // the rider's most recent trip.
+    final trips = await getAssignedTrips();
+    if (trips.isEmpty) {
+      throw Exception(
+        'No trip is assigned to you yet, so a delivery cannot be created.',
+      );
+    }
+    trips.sort((a, b) {
+      final aId = int.tryParse('${a['trip_id']}') ?? 0;
+      final bId = int.tryParse('${b['trip_id']}') ?? 0;
+      return bId.compareTo(aId);
+    });
+
     final delivery = <String, dynamic>{
-      'rider_id': currentUser?.id,
-      'pickup_address': pickupAddress,
-      'delivery_address': deliveryAddress,
-      'distance': distance,
-      'price': price,
-      'package_description': packageDescription,
-      'recipient_name': recipientName,
-      'recipient_phone': recipientPhone,
-      'status': 'pending',
-      'live_tracking_enabled': true,
-      'created_at_iso': DateTime.now().toIso8601String(),
+      'trip_id': trips.first['trip_id'],
+      'pick_location': pickupAddress,
+      'drop_location': deliveryAddress,
+      'delivery_status': 'pending',
     };
-    if (pickupLatitude != null) delivery['pickup_latitude'] = pickupLatitude;
-    if (pickupLongitude != null) {
-      delivery['pickup_longitude'] = pickupLongitude;
-    }
-    if (deliveryLatitude != null) {
-      delivery['delivery_latitude'] = deliveryLatitude;
-    }
-    if (deliveryLongitude != null) {
-      delivery['delivery_longitude'] = deliveryLongitude;
-    }
 
     final dynamic inserted;
     try {
       inserted = await _client
-          .from('deliveries')
+          .from(deliveryTable)
           .insert(delivery)
           .select()
           .single();
     } catch (error) {
-      if (_isMissingTable(error, 'deliveries')) {
+      if (_isMissingTable(error, deliveryTable)) {
         throw Exception(
-          'Delivery setup is incomplete. Create the deliveries table in Supabase first.',
+          'Delivery setup is incomplete. Create the delivery table in Supabase first.',
         );
       }
       rethrow;
     }
-    final result = Map<String, dynamic>.from(inserted);
-    final id = result['id']?.toString();
 
-    if (id != null) {
-      await _client
-          .from('deliveries')
-          .update({'tracking_code': id, 'parcel_id': id})
-          .eq('id', id);
-      result['tracking_code'] = id;
-      result['parcel_id'] = id;
-    }
-
-    return result;
+    return _normalizeDelivery(Map<String, dynamic>.from(inserted));
   }
 
   Future<void> updateDeliveryStatus(String deliveryId, String status) async {
     try {
       await _client
-          .from('deliveries')
-          .update({
-            'status': status,
-            'updated_at': DateTime.now().toIso8601String(),
-          })
-          .eq('id', deliveryId);
+          .from(deliveryTable)
+          .update({'delivery_status': status})
+          .eq('del_id', deliveryId);
     } catch (error) {
-      if (_isMissingTable(error, 'deliveries')) return;
+      if (_isMissingTable(error, deliveryTable)) return;
       rethrow;
     }
   }
@@ -508,17 +567,17 @@ class SupabaseService {
     final dynamic response;
     try {
       response = await _client
-          .from('deliveries')
+          .from(deliveryTable)
           .select()
-          .eq('id', deliveryId)
+          .eq('del_id', deliveryId)
           .maybeSingle();
     } catch (error) {
-      if (_isMissingTable(error, 'deliveries')) return null;
+      if (_isMissingTable(error, deliveryTable)) return null;
       rethrow;
     }
 
     if (response == null) return null;
-    return Map<String, dynamic>.from(response);
+    return _normalizeDelivery(Map<String, dynamic>.from(response));
   }
 
   Future<void> updateRiderLiveLocation({
@@ -585,7 +644,7 @@ class SupabaseService {
 
   // Statistics
   Future<Map<String, dynamic>> getRiderStats(String userId) async {
-    final deliveries = await getDeliveries();
+    final deliveries = await getAssignedDeliveries();
 
     final completed = deliveries
         .where((d) => d['status'] == 'completed')
@@ -611,28 +670,8 @@ class SupabaseService {
     Map<String, dynamic> location,
     String updatedAt,
   ) async {
-    if (riderId.trim().isEmpty) return;
-
-    const liveDeliveryStatuses = [
-      'pending',
-      'accepted',
-      'picked_up',
-      'in_transit',
-      'out_for_delivery',
-    ];
-
-    final deliveries = await getDeliveries();
-
-    for (final delivery in deliveries) {
-      if (!liveDeliveryStatuses.contains(delivery['status'])) continue;
-      await _client
-          .from('deliveries')
-          .update({
-            'rider_live_location': location,
-            'rider_location_updated_at': updatedAt,
-          })
-          .eq('id', delivery['id']);
-    }
+    // The delivery table carries no live-location columns, so the rider's
+    // position is mirrored onto the rider row and rider_locations only.
   }
 
   Map<String, dynamic>? _withoutMissingColumn(
@@ -914,91 +953,6 @@ class SupabaseService {
         _candidateFromValue('NIC', profile['NIC']);
   }
 
-  List<MapEntry<String, String>> _deliveryLookupCandidates(
-    String userId,
-    Map<String, dynamic>? profile,
-  ) {
-    final identityValues = <String>[];
-    final emailValues = <String>[];
-    final nicValues = <String>[];
-
-    void addValue(List<String> values, Object? value, {bool lower = false}) {
-      if (value is! String || value.trim().isEmpty) return;
-      final normalized = lower ? value.trim().toLowerCase() : value.trim();
-      if (!values.contains(normalized)) values.add(normalized);
-    }
-
-    addValue(identityValues, userId);
-    addValue(emailValues, currentUser?.email, lower: true);
-
-    if (profile != null) {
-      for (final key in const [
-        'id',
-        'user_id',
-        'firebase_uid',
-        'uid',
-        'rider_id',
-      ]) {
-        addValue(identityValues, profile[key]);
-      }
-      for (final key in const ['email', 'Email']) {
-        addValue(emailValues, profile[key], lower: true);
-      }
-      for (final key in const ['NIC', 'nic', 'nic_number']) {
-        addValue(nicValues, profile[key]);
-      }
-    }
-
-    final candidates = <MapEntry<String, String>>[];
-    void addCandidates(List<String> columns, List<String> values) {
-      for (final column in columns) {
-        for (final value in values) {
-          candidates.add(MapEntry(column, value));
-        }
-      }
-    }
-
-    addCandidates(const [
-      'rider_id',
-      'riderId',
-      'rider_uid',
-      'riderUid',
-      'rider_user_id',
-      'riderUserId',
-      'firebase_uid',
-      'assigned_rider_id',
-      'assignedRiderId',
-      'assigned_to',
-      'assignedTo',
-    ], identityValues);
-    addCandidates(const [
-      'rider_email',
-      'riderEmail',
-      'assigned_rider_email',
-      'assignedRiderEmail',
-      'email',
-    ], emailValues);
-    addCandidates(const [
-      'rider_nic',
-      'riderNic',
-      'assigned_rider_nic',
-      'assignedRiderNic',
-      'NIC',
-      'nic',
-    ], nicValues);
-
-    return _mergeRiderLookupCandidates(candidates);
-  }
-
-  String _deliveryDedupKey(Map<String, dynamic> delivery) {
-    for (final key in const ['id', 'tracking_code', 'parcel_id']) {
-      final value = delivery[key];
-      if (value is String && value.trim().isNotEmpty) {
-        return '$key:${value.trim()}';
-      }
-    }
-    return jsonEncode(delivery);
-  }
 
   int _compareDeliveriesNewestFirst(
     Map<String, dynamic> a,
@@ -1199,11 +1153,6 @@ class SupabaseService {
     final filterColumn = column.toLowerCase();
     return message.contains('column $tableName.$filterColumn does not exist') ||
         message.contains('column "$tableName"."$filterColumn" does not exist');
-  }
-
-  bool _isInvalidFilterValue(Object error) {
-    return error is PostgrestException &&
-        (error.code == '22P02' || error.code == '42883');
   }
 
   bool _isDuplicateKey(Object error) {

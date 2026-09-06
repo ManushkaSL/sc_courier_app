@@ -31,6 +31,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   late List<Map<String, dynamic>> _deliveries = [];
   late Map<String, dynamic> _stats = {'completed': 0, 'pending': 0};
   bool _isLoading = true;
+  bool _isRefreshingDeliveries = false;
   bool _isRedirectingToLogin = false;
 
   @override
@@ -59,7 +60,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final profile = await RiderService().getRiderByUid(currentUser.id);
       riderName = _profileValue(profile, ['full_name', 'Name'], 'Rider');
 
-      final deliveries = await _supabaseService.getDeliveries();
+      final deliveries = await _supabaseService.getAssignedDeliveries();
       final stats = await _supabaseService.getRiderStats(currentUser.id);
 
       if (mounted) {
@@ -76,6 +77,38 @@ class _DashboardScreenState extends State<DashboardScreen> {
           context,
         ).showSnackBar(SnackBar(content: Text('Error loading data: $e')));
       }
+    }
+  }
+
+  Future<void> _refreshDeliveries() async {
+    if (_isRefreshingDeliveries) return;
+    setState(() => _isRefreshingDeliveries = true);
+
+    try {
+      final currentUser = await _supabaseService.currentUserOrRestored();
+      if (!mounted) return;
+
+      if (currentUser == null) {
+        _redirectToLogin();
+        return;
+      }
+
+      final deliveries = await _supabaseService.getAssignedDeliveries();
+      final stats = await _supabaseService.getRiderStats(currentUser.id);
+      if (!mounted) return;
+
+      setState(() {
+        _deliveries = deliveries;
+        _stats = stats;
+        _isLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not refresh deliveries: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _isRefreshingDeliveries = false);
     }
   }
 
@@ -169,12 +202,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh_outlined),
-            color: Colors.white70,
-            tooltip: 'Refresh deliveries',
-            onPressed: _loadData,
-          ),
-          IconButton(
             icon: const Icon(Icons.settings_outlined),
             color: Colors.white70,
             tooltip: 'Settings',
@@ -209,8 +236,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 _SectionHeader(
                   icon: Icons.local_shipping_outlined,
                   label: 'Active Deliveries',
-                  actionLabel: 'Add',
-                  onAction: _openAddDelivery,
+                  isRefreshing: _isRefreshingDeliveries,
+                  onRefresh: _refreshDeliveries,
                 ),
                 const SizedBox(height: 10),
                 _ActiveDeliveriesPanel(
@@ -448,14 +475,14 @@ class _StatCard extends StatelessWidget {
 class _SectionHeader extends StatelessWidget {
   final IconData icon;
   final String label;
-  final String? actionLabel;
-  final VoidCallback? onAction;
+  final VoidCallback? onRefresh;
+  final bool isRefreshing;
 
   const _SectionHeader({
     required this.icon,
     required this.label,
-    this.actionLabel,
-    this.onAction,
+    this.onRefresh,
+    this.isRefreshing = false,
   });
 
   @override
@@ -474,11 +501,25 @@ class _SectionHeader extends StatelessWidget {
             ),
           ),
         ),
-        if (actionLabel != null && onAction != null)
-          TextButton.icon(
-            onPressed: onAction,
-            icon: const Icon(Icons.add, size: 18),
-            label: Text(actionLabel!),
+        if (onRefresh != null)
+          IconButton(
+            onPressed: isRefreshing ? null : onRefresh,
+            tooltip: 'Refresh deliveries',
+            visualDensity: VisualDensity.compact,
+            icon: isRefreshing
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: _brandOrange,
+                    ),
+                  )
+                : const Icon(
+                    Icons.refresh_rounded,
+                    size: 20,
+                    color: _brandOrange,
+                  ),
           ),
       ],
     );
