@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Status-bar notification icon. Android masks this to a silhouette, so it must
+  be a solid white shape on transparency: any colour or detail here is thrown
+  away and a full-colour icon renders as a white blob.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M3,6.5C3,5.67 3.67,5 4.5,5H14a1,1 0 0,1 1,1v1.5h2.6c0.5,0 0.96,0.25 1.24,0.66l2.4,3.55c0.17,0.25 0.26,0.55 0.26,0.85V16.5c0,0.83 -0.67,1.5 -1.5,1.5h-1.05a2.75,2.75 0 0,1 -5.4,0H9.95a2.75,2.75 0 0,1 -5.4,0H4.5C3.67,18 3,17.33 3,16.5V6.5zM17,9.5v3h3.05l-2.03,-3H17zM7.25,16.05a1.2,1.2 0 1,0 0,2.4 1.2,1.2 0 0,0 0,-2.4zM16.75,16.05a1.2,1.2 0 1,0 0,2.4 1.2,1.2 0 0,0 0,-2.4z" />
+</vector>

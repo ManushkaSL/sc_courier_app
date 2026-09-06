@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 
+import '../models/delivery_status.dart';
 import '../services/supabase_service.dart';
 import 'gps_tracking_screen.dart';
 
 const _brandOrange = Color(0xFFF97316);
 const _successGreen = Color(0xFF4ADE80);
-const _warning = Color(0xFFFFB020);
 const _appBg = Color(0xFF151515);
 const _surface = Color(0xFF222222);
 const _border = Color(0xFF343434);
@@ -324,15 +324,40 @@ class _StatusActions extends StatelessWidget {
     required this.onOpenTracking,
   });
 
+  static const List<_StatusStep> _steps = [
+    _StatusStep(
+      'accepted',
+      'Accepted',
+      'Job accepted',
+      Icons.how_to_reg_outlined,
+    ),
+    _StatusStep(
+      'picked_up',
+      'Picked up',
+      'Parcel collected',
+      Icons.inventory_2_outlined,
+    ),
+    _StatusStep(
+      'in_transit',
+      'In transit',
+      'On the way',
+      Icons.local_shipping_outlined,
+    ),
+    _StatusStep(
+      'completed',
+      'Completed',
+      'Delivered to recipient',
+      Icons.flag_outlined,
+    ),
+  ];
+
   @override
   Widget build(BuildContext context) {
     final status = currentStatus ?? 'pending';
-    const actions = [
-      MapEntry('accepted', 'Accept'),
-      MapEntry('picked_up', 'Picked up'),
-      MapEntry('in_transit', 'In transit'),
-      MapEntry('completed', 'Complete'),
-    ];
+    final currentIndex = _steps.indexWhere((step) => step.key == status);
+    // 'pending' (and anything unknown) sits before the first step, so the whole
+    // track reads as upcoming and 'Accepted' becomes the next action.
+    final nextIndex = currentIndex + 1 < _steps.length ? currentIndex + 1 : -1;
 
     return _SurfacePanel(
       padding: const EdgeInsets.all(16),
@@ -368,30 +393,241 @@ class _StatusActions extends StatelessWidget {
                 ),
             ],
           ),
-          const SizedBox(height: 12),
-          FilledButton.icon(
-            onPressed: onOpenTracking,
-            icon: const Icon(Icons.gps_fixed_outlined, size: 18),
-            label: const Text('Open GPS Tracking'),
+          const SizedBox(height: 14),
+          SizedBox(
+            height: 48,
+            child: FilledButton.icon(
+              onPressed: onOpenTracking,
+              icon: const Icon(Icons.gps_fixed_outlined, size: 18),
+              label: const Text('Open GPS Tracking'),
+            ),
           ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: actions.map((action) {
-              final selected = action.key == status;
-              return OutlinedButton(
-                onPressed: isUpdating || selected
-                    ? null
-                    : () => onStatusSelected(action.key),
-                child: Text(
-                  selected ? _formatStatus(action.key) : action.value,
+          const SizedBox(height: 18),
+          Row(
+            children: [
+              Text(
+                'PROGRESS',
+                style: TextStyle(
+                  color: _textMuted.withValues(alpha: 0.75),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 1.1,
                 ),
-              );
-            }).toList(),
+              ),
+              const SizedBox(width: 10),
+              Expanded(child: Container(height: 1, color: _border)),
+              const SizedBox(width: 10),
+              Text(
+                '${currentIndex + 1}/${_steps.length}',
+                style: const TextStyle(
+                  color: _textMuted,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
           ),
+          const SizedBox(height: 8),
+          for (var i = 0; i < _steps.length; i++)
+            _StatusStepTile(
+              step: _steps[i],
+              isDone: i < currentIndex,
+              isCurrent: i == currentIndex,
+              isNext: i == nextIndex,
+              isLast: i == _steps.length - 1,
+              onTap: isUpdating || i == currentIndex
+                  ? null
+                  : () => onStatusSelected(_steps[i].key),
+            ),
         ],
       ),
+    );
+  }
+}
+
+class _StatusStep {
+  final String key;
+  final String label;
+  final String caption;
+  final IconData icon;
+
+  const _StatusStep(this.key, this.label, this.caption, this.icon);
+}
+
+class _StatusStepTile extends StatelessWidget {
+  final _StatusStep step;
+  final bool isDone;
+  final bool isCurrent;
+  final bool isNext;
+  final bool isLast;
+  final VoidCallback? onTap;
+
+  const _StatusStepTile({
+    required this.step,
+    required this.isDone,
+    required this.isCurrent,
+    required this.isNext,
+    required this.isLast,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = step.key == 'completed' ? _successGreen : _brandOrange;
+    final isActive = isDone || isCurrent;
+
+    return Material(
+      color: isCurrent ? accent.withValues(alpha: 0.07) : Colors.transparent,
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+          child: IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Column(
+                  children: [
+                    Container(
+                      width: 28,
+                      height: 28,
+                      decoration: BoxDecoration(
+                        color: isDone ? accent : Colors.transparent,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: isActive ? accent : _border,
+                          width: 2,
+                        ),
+                      ),
+                      child: Icon(
+                        isDone ? Icons.check : step.icon,
+                        size: 15,
+                        color: isDone
+                            ? Colors.black
+                            : isCurrent
+                            ? accent
+                            : _textMuted.withValues(alpha: 0.55),
+                      ),
+                    ),
+                    if (!isLast)
+                      Expanded(
+                        child: Container(
+                          width: 2,
+                          margin: const EdgeInsets.symmetric(vertical: 4),
+                          color: isDone ? accent : _border,
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Padding(
+                    padding: EdgeInsets.only(bottom: isLast ? 0 : 14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          step.label,
+                          style: TextStyle(
+                            color: isActive ? Colors.white : _textMuted,
+                            fontSize: 15,
+                            fontWeight: isCurrent
+                                ? FontWeight.w800
+                                : FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          isCurrent ? 'Current status' : step.caption,
+                          style: TextStyle(
+                            color: isCurrent
+                                ? accent
+                                : _textMuted.withValues(alpha: 0.7),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Align(
+                  alignment: Alignment.topCenter,
+                  child: _StepTrailing(
+                    accent: accent,
+                    isCurrent: isCurrent,
+                    isNext: isNext,
+                    enabled: onTap != null,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _StepTrailing extends StatelessWidget {
+  final Color accent;
+  final bool isCurrent;
+  final bool isNext;
+  final bool enabled;
+
+  const _StepTrailing({
+    required this.accent,
+    required this.isCurrent,
+    required this.isNext,
+    required this.enabled,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (isCurrent) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: accent.withValues(alpha: 0.14),
+          borderRadius: BorderRadius.circular(30),
+        ),
+        child: Text(
+          'Now',
+          style: TextStyle(
+            color: accent,
+            fontSize: 11,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      );
+    }
+
+    if (isNext) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+        decoration: BoxDecoration(
+          color: enabled ? accent : accent.withValues(alpha: 0.3),
+          borderRadius: BorderRadius.circular(30),
+        ),
+        child: const Text(
+          'Mark',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 12,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      );
+    }
+
+    return Icon(
+      Icons.chevron_right,
+      size: 20,
+      color: _textMuted.withValues(alpha: enabled ? 0.45 : 0.2),
     );
   }
 }
@@ -492,22 +728,19 @@ class _StatusPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = status == 'completed'
-        ? _successGreen
-        : status == 'pending'
-        ? _warning
-        : _brandOrange;
+    final stage = DeliveryStage.fromStatus(status);
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
+        color: stage.color.withValues(alpha: 0.14),
         borderRadius: BorderRadius.circular(30),
+        border: Border.all(color: stage.color.withValues(alpha: 0.35)),
       ),
       child: Text(
-        _formatStatus(status),
+        DeliveryStage.labelFor(status),
         style: TextStyle(
-          color: color,
+          color: stage.color,
           fontSize: 12,
           fontWeight: FontWeight.w800,
         ),

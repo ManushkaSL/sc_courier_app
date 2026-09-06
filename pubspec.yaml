@@ -44,6 +44,12 @@ dependencies:
   flutter_map: ^8.3.1
   latlong2: ^0.10.1
 
+  # Push notifications (FCM). Android config comes from
+  # android/app/google-services.json, so no firebase_options.dart is needed.
+  firebase_core: ^3.8.0
+  firebase_messaging: ^15.1.5
+  flutter_local_notifications: ^18.0.1
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

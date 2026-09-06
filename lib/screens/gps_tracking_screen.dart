@@ -172,7 +172,8 @@ class _GpsTrackingScreenState extends State<GpsTrackingScreen> {
   }) {
     final directLat = _numberFromKeys(delivery, latKeys);
     final directLng = _numberFromKeys(delivery, lngKeys);
-    if (directLat != null && directLng != null) return LatLng(directLat, directLng);
+    if (directLat != null && directLng != null)
+      return LatLng(directLat, directLng);
 
     for (final key in jsonKeys) {
       final value = delivery[key];
@@ -341,7 +342,9 @@ class _StatusPanel extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      isTracking ? 'GPS tracking active' : 'GPS tracking is off',
+                      isTracking
+                          ? 'GPS tracking active'
+                          : 'GPS tracking is off',
                       style: TextStyle(
                         color: color,
                         fontSize: 16,
@@ -375,9 +378,7 @@ class _StatusPanel extends StatelessWidget {
                       ),
                     )
                   : Icon(
-                      isTracking
-                          ? Icons.stop_circle_outlined
-                          : Icons.gps_fixed,
+                      isTracking ? Icons.stop_circle_outlined : Icons.gps_fixed,
                     ),
               label: Text(
                 isStarting
@@ -720,11 +721,7 @@ class _MapMarker extends StatelessWidget {
             ),
             child: Icon(icon, color: Colors.white, size: 18),
           ),
-          Container(
-            width: 3,
-            height: 8,
-            color: color,
-          ),
+          Container(width: 3, height: 8, color: color),
         ],
       ),
     );
@@ -846,7 +843,8 @@ class _DeliveryAddressRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final pickup = delivery['pickup_address']?.toString() ?? 'Pickup not set';
-    final dropoff = delivery['delivery_address']?.toString() ?? 'Dropoff not set';
+    final dropoff =
+        delivery['delivery_address']?.toString() ?? 'Dropoff not set';
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),

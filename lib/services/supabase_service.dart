@@ -4,6 +4,9 @@ import 'dart:typed_data';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../models/app_notification.dart';
+import '../models/delivery_status.dart';
+import '../models/rider_availability.dart';
 import 'pending_registration_service.dart';
 
 class SupabaseService {
@@ -370,6 +373,215 @@ class SupabaseService {
     });
   }
 
+  /// Writes the rider's own work state to `rider.availability`.
+  ///
+  /// Kept separate from [updateRiderProfile] so it touches only the two
+  /// availability columns; the profile payload mappers rewrite the whole
+  /// identity block, which is not wanted for a one-tap status change.
+  /// Column on the rider table holding the rider's own work state.
+  static const availabilityColumn = 'availability_status';
+
+  /// Optional companion column. Dropped from the write if the table does not
+  /// have it, so availability still saves without it.
+  static const _availabilityTimestampColumn = 'availability_updated_at';
+
+  /// Where availability is read from, most specific first. The extra names are
+  /// spellings the table has carried at different points.
+  static const _availabilityReadColumns = [
+    availabilityColumn,
+    'availability',
+    'Availability_Status',
+    'Availability',
+    'rider_status',
+  ];
+
+  Future<Map<String, dynamic>> updateRiderAvailability({
+    required String riderId,
+    required RiderAvailability availability,
+  }) async {
+    final candidates = _riderLookupCandidates(
+      riderId,
+      email: currentUser?.email ?? await _cachedAuthEmail(),
+    );
+
+    for (final candidate in candidates) {
+      var payload = <String, dynamic>{
+        availabilityColumn: availability.key,
+        _availabilityTimestampColumn: DateTime.now().toUtc().toIso8601String(),
+      };
+
+      while (true) {
+        try {
+          final rows = await _client
+              .from(riderTable)
+              .update(payload)
+              .eq(candidate.key, candidate.value)
+              .select();
+
+          final profile = _bestRiderProfile(rows);
+          if (profile != null) {
+            await _cacheUserProfile(riderId, profile);
+            return profile;
+          }
+          // No row matched this lookup column; try the next candidate.
+          break;
+        } catch (error) {
+          final missingColumn = _missingColumnFrom(error);
+
+          if (missingColumn == availabilityColumn) {
+            throw Exception(
+              'The rider table has no "$availabilityColumn" column. '
+              'Run docs/rider-availability.sql in the Supabase SQL editor.',
+            );
+          }
+
+          if (missingColumn != null) {
+            // Only the optional timestamp is left to drop; retry without it.
+            final reduced = _withoutMissingColumn(payload, error);
+            if (reduced != null && reduced.isNotEmpty) {
+              payload = reduced;
+              continue;
+            }
+          }
+
+          if (_isMissingFilterColumn(error, candidate.key)) break;
+          rethrow;
+        }
+      }
+    }
+
+    throw Exception(
+      'No matching rider row was found in Supabase, so availability was not saved.',
+    );
+  }
+
+  /// Availability currently stored for [profile], defaulting to offline.
+  RiderAvailability availabilityFromProfile(Map<String, dynamic>? profile) {
+    if (profile == null) return RiderAvailability.offline;
+    for (final key in _availabilityReadColumns) {
+      if (profile.containsKey(key) && profile[key] != null) {
+        return RiderAvailability.fromKey(profile[key]);
+      }
+    }
+    return RiderAvailability.offline;
+  }
+
+  // Push notifications
+  //
+  // The Edge Function resolves trip.rider_nic -> rider -> device_tokens, so a
+  // token row carries both the auth id and the NIC.
+  static const deviceTokenTable = 'device_tokens';
+  static const notificationTable = 'notifications';
+
+  /// Registers this phone for pushes. Safe to call on every launch: the row is
+  /// keyed on the token, so a reinstall or token rotation replaces it.
+  Future<void> saveDeviceToken(String token) async {
+    final trimmed = token.trim();
+    if (trimmed.isEmpty) return;
+
+    final user = await currentUserOrRestored();
+    final riderId = user?.id;
+    if (riderId == null) return;
+
+    try {
+      await _client.from(deviceTokenTable).upsert({
+        'rider_id': riderId,
+        'rider_nic': await _currentRiderNic(),
+        'token': trimmed,
+        'platform': 'android',
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      }, onConflict: 'token');
+    } catch (error) {
+      if (_isMissingTable(error, deviceTokenTable)) return;
+      rethrow;
+    }
+  }
+
+  /// Called on sign-out so the phone stops receiving the previous rider's work.
+  Future<void> removeDeviceToken(String token) async {
+    final trimmed = token.trim();
+    if (trimmed.isEmpty) return;
+
+    try {
+      await _client.from(deviceTokenTable).delete().eq('token', trimmed);
+    } catch (error) {
+      if (_isMissingTable(error, deviceTokenTable)) return;
+      rethrow;
+    }
+  }
+
+  Future<List<AppNotification>> getNotifications({int limit = 50}) async {
+    final user = await currentUserOrRestored();
+    final riderId = user?.id;
+    if (riderId == null) return [];
+
+    try {
+      final List<dynamic> rows = await _client
+          .from(notificationTable)
+          .select()
+          .eq('rider_id', riderId)
+          .order('created_at', ascending: false)
+          .limit(limit);
+
+      return [
+        for (final row in rows)
+          if (row is Map)
+            AppNotification.fromRow(Map<String, dynamic>.from(row)),
+      ];
+    } catch (error) {
+      if (_isMissingTable(error, notificationTable)) return [];
+      rethrow;
+    }
+  }
+
+  Future<int> unreadNotificationCount() async {
+    final user = await currentUserOrRestored();
+    final riderId = user?.id;
+    if (riderId == null) return 0;
+
+    try {
+      final rows = await _client
+          .from(notificationTable)
+          .select('id')
+          .eq('rider_id', riderId)
+          .isFilter('read_at', null);
+      return rows.length;
+    } catch (error) {
+      if (_isMissingTable(error, notificationTable)) return 0;
+      rethrow;
+    }
+  }
+
+  Future<void> markNotificationRead(String notificationId) async {
+    try {
+      await _client
+          .from(notificationTable)
+          .update({'read_at': DateTime.now().toUtc().toIso8601String()})
+          .eq('id', notificationId)
+          .isFilter('read_at', null);
+    } catch (error) {
+      if (_isMissingTable(error, notificationTable)) return;
+      rethrow;
+    }
+  }
+
+  Future<void> markAllNotificationsRead() async {
+    final user = await currentUserOrRestored();
+    final riderId = user?.id;
+    if (riderId == null) return;
+
+    try {
+      await _client
+          .from(notificationTable)
+          .update({'read_at': DateTime.now().toUtc().toIso8601String()})
+          .eq('rider_id', riderId)
+          .isFilter('read_at', null);
+    } catch (error) {
+      if (_isMissingTable(error, notificationTable)) return;
+      rethrow;
+    }
+  }
+
   // Deliveries
   //
   // Assignment chain: rider."NIC" -> trip.rider_nic, then trip.trip_id ->
@@ -643,26 +855,13 @@ class SupabaseService {
   }
 
   // Statistics
-  Future<Map<String, dynamic>> getRiderStats(String userId) async {
-    final deliveries = await getAssignedDeliveries();
-
-    final completed = deliveries
-        .where((d) => d['status'] == 'completed')
-        .length;
-    final pending = deliveries.where((d) => d['status'] == 'pending').length;
-    final totalEarnings = deliveries
-        .where((d) => d['status'] == 'completed')
-        .fold<double>(
-          0,
-          (sum, d) => sum + ((d['price'] ?? 0) as num).toDouble(),
-        );
-
-    return {
-      'completed': completed,
-      'pending': pending,
-      'total_earnings': totalEarnings,
-      'avatar_url': null,
-    };
+  /// Delivery counters for [userId].
+  ///
+  /// Buckets come from [DeliveryStats] so these match the dashboard exactly.
+  /// The old version matched `status == 'pending'` literally, which counted
+  /// nothing once the backend started handing out 'assigned' and 'accepted'.
+  Future<DeliveryStats> getRiderStats(String userId) async {
+    return DeliveryStats.fromDeliveries(await getAssignedDeliveries());
   }
 
   Future<void> _updateLiveDeliveryLocations(
@@ -952,7 +1151,6 @@ class SupabaseService {
         _candidateFromValue('email', profile['email']) ??
         _candidateFromValue('NIC', profile['NIC']);
   }
-
 
   int _compareDeliveriesNewestFirst(
     Map<String, dynamic> a,

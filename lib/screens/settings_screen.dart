@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../services/location_service.dart';
+import '../services/push_notification_service.dart';
 import '../services/supabase_service.dart';
 import 'login_screen.dart';
 import 'profile_settings_screen.dart';
@@ -47,6 +48,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (_locationService.isTracking) {
       await _locationService.stopTracking();
     }
+
+    // Unregister this phone first: after signOut the delete would be blocked by
+    // the device_tokens row-level policy, and the next rider to sign in here
+    // would keep receiving the previous rider's assignments.
+    final pushService = PushNotificationService();
+    final token = await pushService.getFCMToken();
+    if (token != null) {
+      try {
+        await _supabaseService.removeDeviceToken(token);
+      } catch (_) {
+        // Signing out matters more than tidying the token table.
+      }
+    }
+    await pushService.deleteToken();
+
     await _supabaseService.signOut();
     if (!mounted) return;
     Navigator.pushNamedAndRemoveUntil(
@@ -273,10 +289,7 @@ class _SurfacePanel extends StatelessWidget {
   final Widget child;
   final EdgeInsetsGeometry padding;
 
-  const _SurfacePanel({
-    required this.child,
-    required this.padding,
-  });
+  const _SurfacePanel({required this.child, required this.padding});
 
   @override
   Widget build(BuildContext context) {

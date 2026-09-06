@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'screens/splash_screen.dart';
 import 'screens/login_screen.dart';
@@ -8,6 +10,7 @@ import 'screens/profile_settings_screen.dart';
 import 'screens/extend_delivery_screen.dart';
 import 'screens/gps_tracking_screen.dart';
 import 'screens/delivery_details_screen.dart';
+import 'screens/notifications_screen.dart';
 import 'services/supabase_service.dart';
 import 'services/push_notification_service.dart';
 
@@ -79,12 +82,39 @@ class StartupErrorApp extends StatelessWidget {
   }
 }
 
-class MyApp extends StatelessWidget {
+/// Lets a tapped notification navigate without a BuildContext.
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  StreamSubscription<Map<String, dynamic>>? _notificationTapSubscription;
+
+  @override
+  void initState() {
+    super.initState();
+    // Taps that arrive while the app is running. A tap that cold-started the
+    // app is handled by the dashboard instead, so it does not race the splash
+    // screen's own navigation.
+    _notificationTapSubscription = PushNotificationService().onNotificationTap
+        .listen(openFromNotification);
+  }
+
+  @override
+  void dispose() {
+    _notificationTapSubscription?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: navigatorKey,
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
@@ -216,7 +246,26 @@ class MyApp extends StatelessWidget {
         GpsTrackingScreen.routeName: (context) => const GpsTrackingScreen(),
         DeliveryDetailsScreen.routeName: (context) =>
             const DeliveryDetailsScreen(),
+        NotificationsScreen.routeName: (context) => const NotificationsScreen(),
       },
     );
   }
+}
+
+/// Opens whatever a notification points at: the delivery if it names one,
+/// otherwise the inbox.
+void openFromNotification(Map<String, dynamic> data) {
+  final navigator = navigatorKey.currentState;
+  if (navigator == null) return;
+
+  final deliveryId = data['delivery_id']?.toString().trim();
+  if (deliveryId != null && deliveryId.isNotEmpty) {
+    navigator.pushNamed(
+      DeliveryDetailsScreen.routeName,
+      arguments: {'id': deliveryId},
+    );
+    return;
+  }
+
+  navigator.pushNamed(NotificationsScreen.routeName);
 }

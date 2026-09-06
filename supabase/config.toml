@@ -1,0 +1,8 @@
+# Minimal config so `supabase link` / `supabase functions deploy` work from the
+# project root. Replace the ref with the one in your Supabase URL
+# (https://<ref>.supabase.co), or run `supabase init` to generate a full file.
+project_id = "REPLACE_PROJECT_REF"
+
+[functions.notify-rider]
+# The database calls this with a shared secret header, not a Supabase user JWT.
+verify_jwt = false
