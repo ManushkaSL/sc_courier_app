@@ -305,7 +305,7 @@ async function sendToDevice(
   accessToken: string,
   token: string,
   message: Message,
-): Promise<"sent" | "stale" | "failed"> {
+): Promise<{ status: "sent" | "stale" | "failed"; error?: string }> {
   const response = await fetch(
     `https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`,
     {
@@ -338,7 +338,7 @@ async function sendToDevice(
     },
   );
 
-  if (response.ok) return "sent";
+  if (response.ok) return { status: "sent" };
 
   const errorText = await response.text();
   // The device uninstalled or the token rotated: drop it rather than retrying
@@ -349,23 +349,39 @@ async function sendToDevice(
     errorText.includes("INVALID_ARGUMENT")
   ) {
     console.warn(`Dropping stale token: ${errorText}`);
-    return "stale";
+    return { status: "stale", error: `${response.status}: ${errorText}` };
   }
 
   console.error(`FCM send failed (${response.status}): ${errorText}`);
-  return "failed";
+  return { status: "failed", error: `${response.status}: ${errorText}` };
 }
 
-async function deliver(message: Message): Promise<void> {
+interface DeliveryResult {
+  nic: string;
+  type: string;
+  outcome: string;
+  tokens?: number;
+  delivered?: number;
+  stale?: number;
+  failed?: number;
+  inboxError?: string;
+  fcmError?: string;
+}
+
+async function deliver(message: Message): Promise<DeliveryResult> {
   const riderId = await riderIdForNic(message.nic);
   if (!riderId) {
     console.warn(`No rider row for NIC ${message.nic}; nothing sent`);
-    return;
+    return {
+      nic: message.nic,
+      type: message.type,
+      outcome: "no_rider_for_nic",
+    };
   }
 
   // Written first, so the rider still sees it in the inbox even if every push
   // fails (no token yet, notifications denied, phone offline).
-  await supabase.from("notifications").insert({
+  const { error: inboxError } = await supabase.from("notifications").insert({
     rider_id: riderId,
     rider_nic: message.nic,
     type: message.type,
@@ -374,6 +390,7 @@ async function deliver(message: Message): Promise<void> {
     delivery_id: message.deliveryId,
     trip_id: message.tripId,
   });
+  if (inboxError) console.error("Inbox insert failed:", inboxError.message);
 
   const { data: tokens } = await supabase
     .from("device_tokens")
@@ -382,12 +399,37 @@ async function deliver(message: Message): Promise<void> {
 
   if (!tokens || tokens.length === 0) {
     console.log(`Rider ${riderId} has no registered devices`);
-    return;
+    return {
+      nic: message.nic,
+      type: message.type,
+      outcome: "no_device_tokens",
+      tokens: 0,
+      inboxError: inboxError?.message,
+    };
   }
 
-  const account = serviceAccount();
-  const accessToken = await getAccessToken();
+  let account;
+  let accessToken;
+  try {
+    account = serviceAccount();
+    accessToken = await getAccessToken();
+  } catch (error) {
+    // A bad or missing FIREBASE_SERVICE_ACCOUNT stops here rather than looking
+    // like a delivery failure.
+    return {
+      nic: message.nic,
+      type: message.type,
+      outcome: "fcm_auth_failed",
+      tokens: tokens.length,
+      fcmError: String(error),
+      inboxError: inboxError?.message,
+    };
+  }
+
   const stale: string[] = [];
+  let delivered = 0;
+  let failed = 0;
+  let firstError: string | undefined;
 
   await Promise.all(
     tokens.map(async (row: { token: string }) => {
@@ -397,13 +439,30 @@ async function deliver(message: Message): Promise<void> {
         row.token,
         message,
       );
-      if (result === "stale") stale.push(row.token);
+      if (result.status === "stale") stale.push(row.token);
+      if (result.status === "sent") delivered++;
+      if (result.status !== "sent") {
+        failed++;
+        firstError ??= result.error;
+      }
     }),
   );
 
   if (stale.length > 0) {
     await supabase.from("device_tokens").delete().in("token", stale);
   }
+
+  return {
+    nic: message.nic,
+    type: message.type,
+    outcome: delivered > 0 ? "delivered" : "all_sends_failed",
+    tokens: tokens.length,
+    delivered,
+    stale: stale.length,
+    failed,
+    fcmError: firstError,
+    inboxError: inboxError?.message,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -426,12 +485,23 @@ Deno.serve(async (request) => {
     const payload = (await request.json()) as WebhookBody;
     const messages = await buildMessages(payload);
 
+    const results: DeliveryResult[] = [];
     for (const message of messages) {
-      await deliver(message);
+      results.push(await deliver(message));
     }
 
+    // `delivered` is the count that actually reached a phone. The per-message
+    // outcome is included so net._http_response alone explains a failure.
+    const delivered = results.reduce((sum, r) => sum + (r.delivered ?? 0), 0);
+
     return new Response(
-      JSON.stringify({ ok: true, sent: messages.length }),
+      JSON.stringify({
+        ok: true,
+        event: payload.event,
+        messages: messages.length,
+        delivered,
+        results,
+      }),
       { headers: { "Content-Type": "application/json" } },
     );
   } catch (error) {
