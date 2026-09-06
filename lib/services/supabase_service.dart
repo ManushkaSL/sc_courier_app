@@ -466,6 +466,64 @@ class SupabaseService {
     return RiderAvailability.offline;
   }
 
+  // Realtime
+  //
+  // Assignment happens in the admin tool, so the rider's list has to react to
+  // writes it did not make. Any change on trip/delivery re-runs the normal
+  // authorized fetch rather than trusting the broadcast payload, which keeps
+  // the trip -> delivery join in one place.
+
+  /// Watches for delivery and trip changes. [onChange] can fire in bursts, so
+  /// callers should debounce. Returns a function that cancels the subscription.
+  Future<void> Function() subscribeToDeliveryChanges(void Function() onChange) {
+    final channel = _client.channel(
+      'rider-deliveries-${DateTime.now().millisecondsSinceEpoch}',
+    );
+
+    channel
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: deliveryTable,
+          callback: (_) => onChange(),
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: tripTable,
+          callback: (_) => onChange(),
+        )
+        .subscribe();
+
+    return () => _client.removeChannel(channel);
+  }
+
+  /// Watches this rider's inbox so the unread badge moves without a refresh.
+  Future<void> Function() subscribeToNotifications(
+    String riderId,
+    void Function() onChange,
+  ) {
+    final channel = _client.channel(
+      'rider-notifications-${DateTime.now().millisecondsSinceEpoch}',
+    );
+
+    channel
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: notificationTable,
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'rider_id',
+            value: riderId,
+          ),
+          callback: (_) => onChange(),
+        )
+        .subscribe();
+
+    return () => _client.removeChannel(channel);
+  }
+
   // Push notifications
   //
   // The Edge Function resolves trip.rider_nic -> rider -> device_tokens, so a

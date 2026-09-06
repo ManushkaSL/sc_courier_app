@@ -93,33 +93,28 @@ create extension if not exists pg_net with schema extensions;
 --    rotating the secret does not mean editing function bodies.
 -- ---------------------------------------------------------------------------
 
-do $$
-begin
-  execute format(
-    'alter database %I set app.notify_function_url = %L',
-    current_database(),
-    'https://REPLACE_PROJECT_REF.supabase.co/functions/v1/notify-rider'
-  );
-  execute format(
-    'alter database %I set app.notify_webhook_secret = %L',
-    current_database(),
-    'REPLACE_WITH_A_LONG_RANDOM_STRING'
-  );
-end
-$$;
+create table if not exists public.notification_config (
+  key text primary key,
+  value text not null
+);
 
--- The settings above apply to NEW connections, so make them visible to this
--- session too, otherwise a trigger fired later in this same script sees null.
-select set_config(
-  'app.notify_function_url',
-  'https://REPLACE_PROJECT_REF.supabase.co/functions/v1/notify-rider',
-  false
-);
-select set_config(
-  'app.notify_webhook_secret',
-  'REPLACE_WITH_A_LONG_RANDOM_STRING',
-  false
-);
+alter table public.notification_config enable row level security;
+
+revoke all on public.notification_config from anon;
+revoke all on public.notification_config from authenticated;
+
+insert into public.notification_config (key, value)
+values
+  (
+    'notify_function_url',
+    'https://lzoxjmevvjycclfwjtks.supabase.co/functions/v1/notify-rider'
+  ),
+  (
+    'notify_webhook_secret',
+    'REPLACE_WITH_A_LONG_RANDOM_STRING'
+  )
+on conflict (key)
+do update set value = excluded.value;
 
 -- ---------------------------------------------------------------------------
 -- 5. The trigger function. One function for every event; the Edge Function
@@ -133,13 +128,22 @@ security definer
 set search_path = public, extensions
 as $$
 declare
-  function_url text := current_setting('app.notify_function_url', true);
-  webhook_secret text := current_setting('app.notify_webhook_secret', true);
+  function_url text;
+  webhook_secret text;
   payload jsonb;
 begin
+  select value
+  into function_url
+  from public.notification_config
+  where key = 'notify_function_url';
+
+  select value
+  into webhook_secret
+  from public.notification_config
+  where key = 'notify_webhook_secret';
   -- Not configured yet: never block the admin's write because of it.
   if function_url is null or function_url = '' then
-    raise notice 'app.notify_function_url is not set; skipping rider push';
+    raise notice 'notification_config.notify_function_url is not set; skipping rider push';
     return coalesce(new, old);
   end if;
 

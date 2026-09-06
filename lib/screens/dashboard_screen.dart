@@ -45,6 +45,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final _pushService = PushNotificationService();
   StreamSubscription<String>? _tokenRefreshSubscription;
   int _unreadNotifications = 0;
+  Future<void> Function()? _unsubscribeDeliveries;
+  Future<void> Function()? _unsubscribeNotifications;
+  Timer? _realtimeDebounce;
 
   @override
   void initState() {
@@ -52,6 +55,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _locationService.addListener(_onLocationChanged);
     _loadData();
     _registerForPush();
+    _subscribeToRealtime();
+  }
+
+  /// Live updates for work the admin assigns while the rider is looking at the
+  /// dashboard. The refresh button stays as the manual fallback.
+  void _subscribeToRealtime() {
+    _unsubscribeDeliveries = _supabaseService.subscribeToDeliveryChanges(
+      _onRemoteChange,
+    );
+  }
+
+  /// A single assignment can touch trip and several delivery rows, so coalesce
+  /// the burst into one refetch instead of hammering the API per row.
+  void _onRemoteChange() {
+    _realtimeDebounce?.cancel();
+    _realtimeDebounce = Timer(const Duration(milliseconds: 400), () {
+      if (mounted) _refreshDeliveries(silent: true);
+    });
   }
 
   /// Registers this phone so the Edge Function can reach it, and re-registers
@@ -64,6 +85,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
       _tokenRefreshSubscription = _pushService.onTokenRefresh((newToken) {
         _supabaseService.saveDeviceToken(newToken);
       });
+
+      final currentUser = await _supabaseService.currentUserOrRestored();
+      if (currentUser != null && mounted) {
+        _unsubscribeNotifications = _supabaseService.subscribeToNotifications(
+          currentUser.id,
+          _loadUnreadCount,
+        );
+      }
     } catch (e) {
       // No push is bad, but it must not take the dashboard down with it.
       debugPrint('Could not register for push notifications: $e');
@@ -100,6 +129,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void dispose() {
     _locationService.removeListener(_onLocationChanged);
     _tokenRefreshSubscription?.cancel();
+    _realtimeDebounce?.cancel();
+    _unsubscribeDeliveries?.call();
+    _unsubscribeNotifications?.call();
     super.dispose();
   }
 
@@ -137,9 +169,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  Future<void> _refreshDeliveries() async {
+  /// [silent] skips the spinner on the refresh button: a realtime update
+  /// should not look like the rider pressed something.
+  Future<void> _refreshDeliveries({bool silent = false}) async {
     if (_isRefreshingDeliveries) return;
-    setState(() => _isRefreshingDeliveries = true);
+    if (!silent) setState(() => _isRefreshingDeliveries = true);
 
     try {
       final currentUser = await _supabaseService.currentUserOrRestored();
@@ -165,7 +199,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
         SnackBar(content: Text('Could not refresh deliveries: $e')),
       );
     } finally {
-      if (mounted) setState(() => _isRefreshingDeliveries = false);
+      if (mounted && !silent) {
+        setState(() => _isRefreshingDeliveries = false);
+      }
     }
   }
 
@@ -350,7 +386,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   icon: Icons.local_shipping_outlined,
                   label: 'Active Deliveries',
                   isRefreshing: _isRefreshingDeliveries,
-                  onRefresh: _refreshDeliveries,
+                  onRefresh: () => _refreshDeliveries(),
                 ),
                 const SizedBox(height: 10),
                 _ActiveDeliveriesPanel(
