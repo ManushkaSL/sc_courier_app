@@ -1,0 +1,7 @@
+{
+  "//": "Edge Functions are Deno, not Node. Without this the editor reports 'Cannot find name Deno' and cannot resolve https:// imports, none of which are real errors.",
+  "deno.enable": true,
+  "deno.enablePaths": ["supabase/functions"],
+  "deno.lint": true,
+  "deno.unstable": false
+}

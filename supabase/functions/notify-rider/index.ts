@@ -128,6 +128,25 @@ async function getAccessToken(): Promise<string> {
   return cachedToken.value;
 }
 
+type FcmCredentials =
+  | { projectId: string; accessToken: string; error?: undefined }
+  | { projectId?: undefined; accessToken?: undefined; error: string };
+
+/**
+ * Returned rather than thrown so the caller can report the reason instead of
+ * the whole request failing.
+ */
+async function fcmCredentials(): Promise<FcmCredentials> {
+  try {
+    return {
+      projectId: serviceAccount().project_id,
+      accessToken: await getAccessToken(),
+    };
+  } catch (error) {
+    return { error: String(error) };
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Turning a database event into messages.
 // ---------------------------------------------------------------------------
@@ -290,14 +309,33 @@ async function buildMessages(payload: WebhookBody): Promise<Message[]> {
 
 /** rider.NIC -> the auth user id the app signs in as. */
 async function riderIdForNic(nic: string): Promise<string | null> {
-  const { data } = await supabase
+  const { data: rider, error: riderError } = await supabase
     .from("rider")
-    .select("id, user_id")
+    .select("email")
     .eq("NIC", nic)
     .limit(1)
     .maybeSingle();
 
-  return text(data?.user_id) ?? text(data?.id);
+  if (riderError) {
+    console.error("Rider lookup error:", riderError);
+    return null;
+  }
+
+  const email = text(rider?.email);
+  if (!email) return null;
+
+  const { data, error } = await supabase.auth.admin.listUsers();
+
+  if (error) {
+    console.error("Auth user lookup error:", error);
+    return null;
+  }
+
+  const user = data.users.find(
+    (u) => u.email?.toLowerCase() === email.toLowerCase(),
+  );
+
+  return user?.id ?? null;
 }
 
 async function sendToDevice(
@@ -408,20 +446,16 @@ async function deliver(message: Message): Promise<DeliveryResult> {
     };
   }
 
-  let account;
-  let accessToken;
-  try {
-    account = serviceAccount();
-    accessToken = await getAccessToken();
-  } catch (error) {
-    // A bad or missing FIREBASE_SERVICE_ACCOUNT stops here rather than looking
-    // like a delivery failure.
+  // A bad or missing FIREBASE_SERVICE_ACCOUNT stops here rather than looking
+  // like a delivery failure.
+  const credentials = await fcmCredentials();
+  if (credentials.error !== undefined) {
     return {
       nic: message.nic,
       type: message.type,
       outcome: "fcm_auth_failed",
       tokens: tokens.length,
-      fcmError: String(error),
+      fcmError: credentials.error,
       inboxError: inboxError?.message,
     };
   }
@@ -434,8 +468,8 @@ async function deliver(message: Message): Promise<DeliveryResult> {
   await Promise.all(
     tokens.map(async (row: { token: string }) => {
       const result = await sendToDevice(
-        account.project_id,
-        accessToken,
+        credentials.projectId,
+        credentials.accessToken,
         row.token,
         message,
       );
