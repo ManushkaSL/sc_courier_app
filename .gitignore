@@ -52,3 +52,11 @@ app.*.map.json
 /logo_animation.mp4
 /logo animation1.mp4
 /git
+
+# Credentials - never commit. The Firebase service account can send push as
+# this project; GitHub secret scanning blocks pushes that contain it.
+firebase-secret.env
+*firebase-adminsdk*.json
+service-account*.json
+*.env
+!.env.example
