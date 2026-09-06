@@ -13,6 +13,14 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.47.10";
 
 const FCM_SCOPE = "https://www.googleapis.com/auth/firebase.messaging";
+/**
+ * How long after a trip is assigned its deliveries count as part of that same
+ * assignment rather than separate additions. Long enough to cover an admin
+ * adding several parcels to a new trip; short enough that a genuine addition
+ * later in the day still notifies.
+ */
+const NEW_TRIP_GRACE_MS = 5 * 60 * 1000;
+
 const CANCELLED_STATUSES = [
   "cancelled",
   "canceled",
@@ -163,15 +171,141 @@ function destinationOf(delivery: Record<string, unknown>): string | null {
     text(delivery.dropLocation);
 }
 
-/** Which rider currently holds a trip. */
-async function riderNicForTrip(tripId: string | null): Promise<string | null> {
+async function tripRow(
+  tripId: string | null,
+): Promise<Record<string, unknown> | null> {
   if (!tripId) return null;
   const { data } = await supabase
     .from("trip")
-    .select("rider_nic")
+    .select("*")
     .eq("trip_id", tripId)
     .maybeSingle();
-  return text(data?.rider_nic);
+  return data ?? null;
+}
+
+/** Which rider currently holds a trip. */
+async function riderNicForTrip(tripId: string | null): Promise<string | null> {
+  return text((await tripRow(tripId))?.rider_nic);
+}
+
+/** When the trip row itself was created, if the table records that. */
+function tripCreatedAt(trip: Record<string, unknown> | null): Date | null {
+  if (!trip) return null;
+  for (const key of ["created_at", "createdAt", "created", "created_date"]) {
+    const value = text(trip[key]);
+    if (!value) continue;
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.getTime())) return parsed;
+  }
+  return null;
+}
+
+/**
+ * True when the rider was already told about this trip a moment ago.
+ *
+ * Assigning a trip writes the trip row and then its delivery rows, which fires
+ * both trip_assigned and delivery_added. The rider only needs to hear about it
+ * once, so deliveries arriving in the wake of a fresh assignment stay silent.
+ * A delivery added to a trip the rider has had for a while is a genuinely new
+ * event and still notifies.
+ */
+/** Any delivery on the trip, so a trip-level notification can still be tapped. */
+async function firstDeliveryIdForTrip(
+  tripId: string | null,
+): Promise<string | null> {
+  if (!tripId) return null;
+  const { data } = await supabase
+    .from("delivery")
+    .select("del_id")
+    .eq("trip_id", tripId)
+    .limit(1)
+    .maybeSingle();
+  return text(data?.del_id);
+}
+
+/**
+ * Whether this trip has ever been announced to a rider. Permanent, not
+ * time-boxed: it is what decides "assigned" (the first time the rider hears
+ * about the trip) versus "added" (something new on a trip they already have).
+ */
+async function tripAlreadyAnnounced(tripId: string | null): Promise<boolean> {
+  if (!tripId) return false;
+  const { data } = await supabase
+    .from("notifications")
+    .select("id")
+    .eq("trip_id", tripId)
+    .eq("type", "trip_assigned")
+    .limit(1);
+  return (data?.length ?? 0) > 0;
+}
+
+async function wasTripJustAssigned(tripId: string | null): Promise<boolean> {
+  if (!tripId) return false;
+
+  const cutoff = Date.now() - NEW_TRIP_GRACE_MS;
+
+  // Preferred check: the trip's own age. The two triggers reach this function
+  // as independent pg_net requests with no ordering guarantee, so asking
+  // whether the assignment notification has landed yet can race. The trip row
+  // is already committed by the time either request arrives.
+  const created = tripCreatedAt(await tripRow(tripId));
+  if (created) return created.getTime() >= cutoff;
+
+  // Fallback for a trip table that does not record a creation time.
+  const { data } = await supabase
+    .from("notifications")
+    .select("id")
+    .eq("trip_id", tripId)
+    .eq("type", "trip_assigned")
+    .gte("created_at", new Date(cutoff).toISOString())
+    .limit(1);
+
+  return (data?.length ?? 0) > 0;
+}
+
+/**
+ * One delivery arriving on a rider's trip, turned into at most one message.
+ *
+ * The first delivery on a trip is what announces the assignment, so the
+ * notification carries a real delivery id and tapping it opens that delivery.
+ * The rest of the batch stays silent, and anything landing on a trip the rider
+ * already has is a genuine addition.
+ */
+async function deliveryArrivalMessage(
+  nic: string,
+  tripId: string | null,
+  record: Record<string, unknown>,
+): Promise<Message | null> {
+  const deliveryId = text(record.del_id) ?? text(record.id);
+  const destination = destinationOf(record);
+
+  if (!(await tripAlreadyAnnounced(tripId))) {
+    return {
+      nic,
+      type: "trip_assigned",
+      title: "New delivery assigned",
+      body: destination
+        ? `You have a new delivery to ${destination}. Tap to see the details.`
+        : "You have been assigned a new delivery. Tap to see the details.",
+      deliveryId,
+      tripId,
+    };
+  }
+
+  // Already announced and the trip is still fresh: this is the rest of the
+  // same assignment, which the rider has just been told about.
+  if (await wasTripJustAssigned(tripId)) return null;
+
+  return {
+    nic,
+    type: "delivery_added",
+    title: "New delivery added",
+    body: destination
+      ? `A delivery to ${destination} was added to your trip.`
+      : "A delivery was added to your trip.",
+    deliveryId,
+    tripId,
+  };
 }
 
 async function buildMessages(payload: WebhookBody): Promise<Message[]> {
@@ -181,16 +315,10 @@ async function buildMessages(payload: WebhookBody): Promise<Message[]> {
 
   switch (payload.event) {
     case "trip_assigned": {
-      const nic = text(record.rider_nic);
-      if (nic) {
-        messages.push({
-          nic,
-          type: "trip_assigned",
-          title: "New delivery assigned",
-          body: "You have been assigned a new trip. Tap to see the details.",
-          tripId: text(record.trip_id),
-        });
-      }
+      // Deliberately silent. A trip row is created before its deliveries
+      // exist, so notifying here means a notification with nothing to open.
+      // The trip's first delivery announces the assignment instead, carrying a
+      // delivery id so the rider lands on the delivery itself.
       break;
     }
 
@@ -199,12 +327,15 @@ async function buildMessages(payload: WebhookBody): Promise<Message[]> {
       const previousNic = text(oldRecord.rider_nic);
 
       if (newNic) {
+        // An existing trip changing hands already has deliveries on it.
+        const tripId = text(record.trip_id);
         messages.push({
           nic: newNic,
           type: "trip_assigned",
           title: "New delivery assigned",
           body: "You have been assigned a new trip. Tap to see the details.",
-          tripId: text(record.trip_id),
+          deliveryId: await firstDeliveryIdForTrip(tripId),
+          tripId,
         });
       }
       // Tell the rider who lost it, so they do not ride to a dead pickup.
@@ -221,19 +352,11 @@ async function buildMessages(payload: WebhookBody): Promise<Message[]> {
     }
 
     case "delivery_added": {
-      const nic = await riderNicForTrip(text(record.trip_id));
+      const tripId = text(record.trip_id);
+      const nic = await riderNicForTrip(tripId);
       if (nic) {
-        const destination = destinationOf(record);
-        messages.push({
-          nic,
-          type: "delivery_added",
-          title: "New delivery added",
-          body: destination
-            ? `A delivery to ${destination} was added to your trip.`
-            : "A delivery was added to your trip.",
-          deliveryId: text(record.del_id) ?? text(record.id),
-          tripId: text(record.trip_id),
-        });
+        const message = await deliveryArrivalMessage(nic, tripId, record);
+        if (message) messages.push(message);
       }
       break;
     }
@@ -269,16 +392,12 @@ async function buildMessages(payload: WebhookBody): Promise<Message[]> {
         ]);
 
         if (newNic) {
-          messages.push({
-            nic: newNic,
-            type: "delivery_added",
-            title: "New delivery added",
-            body: destination
-              ? `A delivery to ${destination} was added to your trip.`
-              : "A delivery was added to your trip.",
-            deliveryId,
-            tripId: newTripId,
-          });
+          const message = await deliveryArrivalMessage(
+            newNic,
+            newTripId,
+            record,
+          );
+          if (message) messages.push(message);
         }
         if (oldNic && oldNic !== newNic) {
           messages.push({
