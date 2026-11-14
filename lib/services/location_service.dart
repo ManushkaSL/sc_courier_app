@@ -17,11 +17,18 @@ class LocationService extends ChangeNotifier {
   String _statusMessage = 'GPS tracking is off';
   StreamSubscription<Position>? _positionStream;
   String? _trackingRiderId;
+  String? _activeDeliveryId;
   final _supabaseService = SupabaseService();
 
   bool get isTracking => _isTracking;
   Position? get currentPosition => _currentPosition;
   String get statusMessage => _statusMessage;
+  String? get activeDeliveryId => _activeDeliveryId;
+
+  void setActiveDelivery(String? deliveryId) {
+    _activeDeliveryId = deliveryId;
+    notifyListeners();
+  }
 
   /// Returns null if permission is granted, otherwise a reason string.
   Future<String?> _ensurePermission() async {
@@ -44,7 +51,10 @@ class LocationService extends ChangeNotifier {
   }
 
   /// Starts GPS tracking. Returns an error message on failure, null on success.
-  Future<String?> startTracking() async {
+  Future<String?> startTracking({String? activeDeliveryId}) async {
+    if (activeDeliveryId != null) {
+      _activeDeliveryId = activeDeliveryId;
+    }
     final riderId = _supabaseService.currentUser?.id;
     if (riderId == null) {
       _statusMessage = 'Sign in before starting GPS tracking.';
@@ -132,6 +142,7 @@ class LocationService extends ChangeNotifier {
     _positionStream = null;
     _isTracking = false;
     _trackingRiderId = null;
+    _activeDeliveryId = null;
     _currentPosition = null;
     _statusMessage = 'GPS tracking is off';
   }

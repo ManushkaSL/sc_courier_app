@@ -1,6 +1,6 @@
 import 'dart:convert';
-import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -678,47 +678,135 @@ class SupabaseService {
     }
   }
 
-  /// Every delivery assigned to the signed-in rider through one of their trips.
+  /// Every delivery assigned to the signed-in rider.
+  ///
+  /// Queries both the modern `personal_delivery` table (assigned by staff/admin)
+  /// and the legacy `delivery` table (via trips).
   Future<List<Map<String, dynamic>>> getAssignedDeliveries({
     String? status,
   }) async {
-    final trips = await getAssignedTrips();
-    if (trips.isEmpty) return [];
-
-    final tripsById = <String, Map<String, dynamic>>{};
-    final tripIds = <dynamic>[];
-    for (final trip in trips) {
-      final id = trip['trip_id'];
-      if (id == null) continue;
-      tripsById[id.toString()] = trip;
-      tripIds.add(id);
-    }
-    if (tripIds.isEmpty) return [];
-
-    final List<dynamic> response;
-    try {
-      var query = _client
-          .from(deliveryTable)
-          .select()
-          .inFilter('trip_id', tripIds);
-      if (status != null) query = query.eq('delivery_status', status);
-      response = await query;
-    } catch (error) {
-      if (_isMissingTable(error, deliveryTable)) return [];
-      rethrow;
-    }
-
     final deliveries = <Map<String, dynamic>>[];
-    for (final row in response) {
-      if (row is! Map) continue;
-      final delivery = _normalizeDelivery(Map<String, dynamic>.from(row));
-      final trip = tripsById[delivery['trip_id']?.toString()];
-      if (trip != null) delivery['trip'] = trip;
-      deliveries.add(delivery);
+    final user = await currentUserOrRestored();
+    final uid = user?.id;
+    final nic = await _currentRiderNic();
+
+    // 1. Fetch personal deliveries assigned to this rider
+    if (uid != null || nic != null) {
+      try {
+        var query = _client.from('personal_delivery').select();
+        if (uid != null && nic != null) {
+          query = query.or('assigned_rider_user_id.eq.$uid,assigned_rider_nic.eq.$nic');
+        } else if (uid != null) {
+          query = query.eq('assigned_rider_user_id', uid);
+        } else if (nic != null) {
+          query = query.eq('assigned_rider_nic', nic);
+        }
+
+        final List<dynamic> pdRows = await query;
+        for (final row in pdRows) {
+          if (row is! Map) continue;
+          final normalized = _normalizePersonalDelivery(Map<String, dynamic>.from(row));
+          if (status != null && normalized['status'] != status) continue;
+          deliveries.add(normalized);
+        }
+      } catch (e) {
+        debugPrint('Could not fetch personal_delivery: $e');
+      }
+    }
+
+    // 2. Fetch legacy deliveries via trips
+    final trips = await getAssignedTrips();
+    if (trips.isNotEmpty) {
+      final tripsById = <String, Map<String, dynamic>>{};
+      final tripIds = <dynamic>[];
+      for (final trip in trips) {
+        final id = trip['trip_id'];
+        if (id == null) continue;
+        tripsById[id.toString()] = trip;
+        tripIds.add(id);
+      }
+
+      if (tripIds.isNotEmpty) {
+        try {
+          var query = _client
+              .from(deliveryTable)
+              .select()
+              .inFilter('trip_id', tripIds);
+          if (status != null) query = query.eq('delivery_status', status);
+          final List<dynamic> response = await query;
+
+          for (final row in response) {
+            if (row is! Map) continue;
+            final delivery = _normalizeDelivery(Map<String, dynamic>.from(row));
+            final trip = tripsById[delivery['trip_id']?.toString()];
+            if (trip != null) delivery['trip'] = trip;
+            deliveries.add(delivery);
+          }
+        } catch (error) {
+          if (!_isMissingTable(error, deliveryTable)) {
+            debugPrint('Could not fetch legacy deliveryTable: $error');
+          }
+        }
+      }
     }
 
     deliveries.sort(_compareDeliveriesNewestFirst);
     return deliveries;
+  }
+
+  /// Maps `personal_delivery` columns onto the keys the screens read.
+  Map<String, dynamic> _normalizePersonalDelivery(Map<String, dynamic> row) {
+    final pd = Map<String, dynamic>.from(row);
+    final pdId = row['pd_id']?.toString() ?? '';
+    pd['id'] = pdId;
+    pd['tracking_code'] = 'PD-$pdId';
+    pd['parcel_id'] = pdId;
+    pd['is_personal_delivery'] = true;
+
+    final rawStatus = (row['status'] ?? 'pending').toString().toLowerCase();
+    String normalizedStatus = rawStatus;
+    if (rawStatus == 'assigned') {
+      normalizedStatus = 'assigned';
+    } else if (rawStatus == 'accepted') {
+      normalizedStatus = 'accepted';
+    } else if (rawStatus == 'in transit' || rawStatus == 'in_transit') {
+      normalizedStatus = 'in_transit';
+    } else if (rawStatus == 'picked up' || rawStatus == 'picked_up') {
+      normalizedStatus = 'picked_up';
+    } else if (rawStatus == 'completed' || rawStatus == 'delivered') {
+      normalizedStatus = 'completed';
+    } else if (rawStatus == 'cancelled' || rawStatus == 'declined') {
+      normalizedStatus = 'cancelled';
+    }
+    pd['status'] = normalizedStatus;
+
+    pd['pickup_address'] = row['pickup_address'] ?? 'Pickup location';
+    if (row['pickup_lat'] != null) pd['pickup_latitude'] = row['pickup_lat'];
+    if (row['pickup_lng'] != null) pd['pickup_longitude'] = row['pickup_lng'];
+
+    pd['delivery_address'] = row['drop_address'] ?? 'Drop-off location';
+    if (row['drop_lat'] != null) pd['delivery_latitude'] = row['drop_lat'];
+    if (row['drop_lng'] != null) pd['delivery_longitude'] = row['drop_lng'];
+
+    pd['recipient_name'] = row['receiver_name'] ?? 'Recipient';
+    pd['recipient_phone'] = row['receiver_phone'] ?? '';
+    pd['sender_name'] = row['sender_name'] ?? 'Sender';
+    pd['sender_phone'] = row['sender_phone'] ?? '';
+
+    final itemType = row['item_type'];
+    final itemDesc = row['item_description'];
+    if (itemType != null && itemDesc != null && itemDesc.toString().isNotEmpty) {
+      pd['package_description'] = '$itemType — $itemDesc';
+    } else {
+      pd['package_description'] = itemType ?? itemDesc ?? 'Personal parcel';
+    }
+
+    if (row['item_weight'] != null) {
+      pd['price'] = '${row['item_weight']} kg';
+    }
+    pd['created_at'] = row['created_at'];
+
+    return pd;
   }
 
   /// Deliveries for the signed-in rider. Assignment only ever arrives through a
@@ -822,18 +910,66 @@ class SupabaseService {
   }
 
   Future<void> updateDeliveryStatus(String deliveryId, String status) async {
+    // 1. If it's a personal delivery (e.g. numeric ID or PD-X)
+    final numericId = int.tryParse(deliveryId.replaceAll(RegExp(r'[^0-9]'), ''));
+    if (numericId != null) {
+      String dbStatus = status;
+      if (status == 'accepted') {
+        dbStatus = 'Accepted';
+      } else if (status == 'picked_up') {
+        dbStatus = 'In Transit';
+      } else if (status == 'in_transit') {
+        dbStatus = 'In Transit';
+      } else if (status == 'completed') {
+        dbStatus = 'Delivered';
+      } else if (status == 'cancelled') {
+        dbStatus = 'Cancelled';
+      }
+
+      try {
+        await _client
+            .from('personal_delivery')
+            .update({'status': dbStatus})
+            .eq('pd_id', numericId);
+      } catch (e) {
+        debugPrint('Could not update personal_delivery status: $e');
+      }
+    }
+
+    // 2. Also attempt update on legacy delivery table
     try {
       await _client
           .from(deliveryTable)
           .update({'delivery_status': status})
           .eq('del_id', deliveryId);
     } catch (error) {
-      if (_isMissingTable(error, deliveryTable)) return;
-      rethrow;
+      if (!_isMissingTable(error, deliveryTable)) {
+        debugPrint('Could not update delivery table: $error');
+      }
     }
   }
 
+  Future<void> cancelDelivery(String deliveryId) async {
+    await updateDeliveryStatus(deliveryId, 'cancelled');
+  }
+
   Future<Map<String, dynamic>?> getDeliveryById(String deliveryId) async {
+    // 1. Try personal_delivery first if numeric
+    final numericId = int.tryParse(deliveryId.replaceAll(RegExp(r'[^0-9]'), ''));
+    if (numericId != null) {
+      try {
+        final row = await _client
+            .from('personal_delivery')
+            .select()
+            .eq('pd_id', numericId)
+            .maybeSingle();
+        if (row != null) {
+          return _normalizePersonalDelivery(Map<String, dynamic>.from(row));
+        }
+      } catch (_) {}
+    }
+
+    // 2. Try legacy delivery table
     final dynamic response;
     try {
       response = await _client
@@ -927,8 +1063,34 @@ class SupabaseService {
     Map<String, dynamic> location,
     String updatedAt,
   ) async {
-    // The delivery table carries no live-location columns, so the rider's
-    // position is mirrored onto the rider row and rider_locations only.
+    final lat = location['latitude'];
+    final lng = location['longitude'];
+
+    // 1. Update personal_delivery records assigned to this rider if location columns exist
+    try {
+      await _client
+          .from('personal_delivery')
+          .update({
+            'rider_lat': lat,
+            'rider_lng': lng,
+            'last_location_at': updatedAt,
+          })
+          .eq('assigned_rider_user_id', riderId)
+          .inFilter('status', ['Assigned', 'Accepted', 'Picked Up', 'In Transit']);
+    } catch (_) {
+      // Column may not exist on some deployments, ignore gracefully
+    }
+
+    // 2. Also update delivery table if it has location columns
+    try {
+      await _client
+          .from(deliveryTable)
+          .update({
+            'rider_live_location': location,
+            'rider_location_updated_at': updatedAt,
+          })
+          .eq('rider_id', riderId);
+    } catch (_) {}
   }
 
   Map<String, dynamic>? _withoutMissingColumn(
@@ -994,6 +1156,11 @@ class SupabaseService {
     );
     setAll(['profile_completed_at'], ['profile_completed_at']);
     setAll(['updated_at'], ['updated_at']);
+    setAll(['current_lat'], ['current_lat']);
+    setAll(['current_lng'], ['current_lng']);
+    setAll(['live_location'], ['live_location']);
+    setAll(['is_tracking'], ['is_tracking']);
+    setAll(['last_location_at'], ['last_location_at']);
 
     return payload;
   }

@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
 
 import '../models/delivery_status.dart';
+import '../services/location_service.dart';
 import '../services/supabase_service.dart';
 import 'gps_tracking_screen.dart';
 
@@ -73,6 +76,16 @@ class _DeliveryDetailsScreenState extends State<DeliveryDetailsScreen> {
       setState(() {
         _delivery = {...?_delivery, 'status': status};
       });
+
+      // Activate tracking on accept; stop on completion or cancellation
+      if (status == 'accepted') {
+        LocationService().startTracking(activeDeliveryId: id);
+      } else if (status == 'completed' || status == 'cancelled') {
+        if (LocationService().activeDeliveryId == id) {
+          LocationService().stopTracking();
+        }
+      }
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Delivery marked ${_formatStatus(status)}')),
       );
@@ -86,8 +99,44 @@ class _DeliveryDetailsScreenState extends State<DeliveryDetailsScreen> {
     }
   }
 
+  Future<void> _cancelDelivery() async {
+    final id = _textValue(_delivery, const ['id']);
+    if (id == null) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _surface,
+        title: const Text('Cancel Assignment?', style: TextStyle(color: Colors.white)),
+        content: const Text(
+          'Are you sure you want to cancel this delivery assignment? Tracking for this delivery will stop.',
+          style: TextStyle(color: _textMuted),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('No, Keep it'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Yes, Cancel'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await _updateStatus('cancelled');
+    }
+  }
+
   void _openTracking() {
-    Navigator.pushNamed(context, GpsTrackingScreen.routeName);
+    Navigator.pushNamed(
+      context,
+      GpsTrackingScreen.routeName,
+      arguments: {'delivery': _delivery},
+    );
   }
 
   @override
@@ -160,6 +209,13 @@ class _DeliveryDetailsScreenState extends State<DeliveryDetailsScreen> {
                         ),
                       ],
                     ),
+                    if (_hasCoordinates(delivery)) ...[
+                      const SizedBox(height: 14),
+                      _RouteMapPreview(
+                        delivery: delivery,
+                        onOpenMap: _openTracking,
+                      ),
+                    ],
                     const SizedBox(height: 14),
                     _SectionPanel(
                       title: 'Recipient',
@@ -241,6 +297,7 @@ class _DeliveryDetailsScreenState extends State<DeliveryDetailsScreen> {
                       isUpdating: _isUpdatingStatus,
                       onStatusSelected: _updateStatus,
                       onOpenTracking: _openTracking,
+                      onCancel: _cancelDelivery,
                     ),
                   ],
                 ),
@@ -316,12 +373,14 @@ class _StatusActions extends StatelessWidget {
   final bool isUpdating;
   final ValueChanged<String> onStatusSelected;
   final VoidCallback onOpenTracking;
+  final VoidCallback? onCancel;
 
   const _StatusActions({
     required this.currentStatus,
     required this.isUpdating,
     required this.onStatusSelected,
     required this.onOpenTracking,
+    this.onCancel,
   });
 
   static const List<_StatusStep> _steps = [
@@ -359,6 +418,11 @@ class _StatusActions extends StatelessWidget {
     // track reads as upcoming and 'Accepted' becomes the next action.
     final nextIndex = currentIndex + 1 < _steps.length ? currentIndex + 1 : -1;
 
+    final isNewAssignment = status == 'pending' || status == 'assigned';
+    final isActiveDelivery = status == 'accepted' || status == 'picked_up' || status == 'in_transit';
+    final isCancelled = status == 'cancelled';
+    final isCompleted = status == 'completed';
+
     return _SurfacePanel(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -394,15 +458,117 @@ class _StatusActions extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 14),
-          SizedBox(
-            height: 48,
-            child: FilledButton.icon(
-              onPressed: onOpenTracking,
-              icon: const Icon(Icons.gps_fixed_outlined, size: 18),
-              label: const Text('Open GPS Tracking'),
+
+          // 1. New Assignment: Accept or Cancel
+          if (isNewAssignment) ...[
+            Row(
+              children: [
+                Expanded(
+                  child: SizedBox(
+                    height: 48,
+                    child: FilledButton.icon(
+                      onPressed: isUpdating ? null : () => onStatusSelected('accepted'),
+                      icon: const Icon(Icons.check_circle_outline, size: 20),
+                      label: const Text('Accept Delivery', style: TextStyle(fontWeight: FontWeight.w700)),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: _successGreen,
+                        foregroundColor: Colors.black,
+                      ),
+                    ),
+                  ),
+                ),
+                if (onCancel != null) ...[
+                  const SizedBox(width: 10),
+                  SizedBox(
+                    height: 48,
+                    child: OutlinedButton.icon(
+                      onPressed: isUpdating ? null : onCancel,
+                      icon: const Icon(Icons.close, size: 18, color: Colors.redAccent),
+                      label: const Text('Decline', style: TextStyle(color: Colors.redAccent)),
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: Colors.redAccent),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
             ),
-          ),
-          const SizedBox(height: 18),
+            const SizedBox(height: 12),
+          ] else if (isActiveDelivery) ...[
+            // 2. Active Delivery: Start Turn-by-Turn Navigation
+            SizedBox(
+              height: 50,
+              child: FilledButton.icon(
+                onPressed: onOpenTracking,
+                icon: const Icon(Icons.navigation, size: 20),
+                label: const Text(
+                  'Start Navigation (Google Maps Style)',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
+                style: FilledButton.styleFrom(
+                  backgroundColor: _brandOrange,
+                  foregroundColor: Colors.white,
+                ),
+              ),
+            ),
+            if (onCancel != null) ...[
+              const SizedBox(height: 8),
+              Center(
+                child: TextButton.icon(
+                  onPressed: isUpdating ? null : onCancel,
+                  icon: const Icon(Icons.cancel_outlined, size: 16, color: Colors.redAccent),
+                  label: const Text(
+                    'Cancel Assignment',
+                    style: TextStyle(color: Colors.redAccent, fontSize: 13),
+                  ),
+                ),
+              ),
+            ],
+            const SizedBox(height: 12),
+          ] else if (isCompleted) ...[
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: _successGreen.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: _successGreen.withValues(alpha: 0.3)),
+              ),
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.check_circle, color: _successGreen, size: 20),
+                  SizedBox(width: 8),
+                  Text(
+                    'Parcel Delivered Successfully',
+                    style: TextStyle(color: _successGreen, fontWeight: FontWeight.w700),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+          ] else if (isCancelled) ...[
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.redAccent.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.redAccent.withValues(alpha: 0.3)),
+              ),
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.cancel, color: Colors.redAccent, size: 20),
+                  SizedBox(width: 8),
+                  Text(
+                    'Assignment Cancelled',
+                    style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.w700),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+
           Row(
             children: [
               Text(
@@ -832,4 +998,130 @@ String _formatStatus(String status) {
   final text = status.replaceAll('_', ' ').trim();
   if (text.isEmpty) return 'Unknown';
   return text[0].toUpperCase() + text.substring(1);
+}
+
+bool _hasCoordinates(Map<String, dynamic> delivery) {
+  final pLat = delivery['pickup_latitude'] ?? delivery['pickup_lat'];
+  final dLat = delivery['delivery_latitude'] ?? delivery['drop_lat'];
+  return pLat != null || dLat != null;
+}
+
+class _RouteMapPreview extends StatelessWidget {
+  final Map<String, dynamic> delivery;
+  final VoidCallback onOpenMap;
+
+  const _RouteMapPreview({
+    required this.delivery,
+    required this.onOpenMap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final pLat = _asDouble(delivery['pickup_latitude'] ?? delivery['pickup_lat']);
+    final pLng = _asDouble(delivery['pickup_longitude'] ?? delivery['pickup_lng']);
+    final dLat = _asDouble(delivery['delivery_latitude'] ?? delivery['drop_lat']);
+    final dLng = _asDouble(delivery['delivery_longitude'] ?? delivery['drop_lng']);
+
+    LatLng? pickupPoint;
+    if (pLat != null && pLng != null) pickupPoint = LatLng(pLat, pLng);
+
+    LatLng? dropPoint;
+    if (dLat != null && dLng != null) dropPoint = LatLng(dLat, dLng);
+
+    final center = pickupPoint ?? dropPoint ?? const LatLng(6.9271, 79.8612);
+
+    final markers = <Marker>[
+      if (pickupPoint != null)
+        Marker(
+          point: pickupPoint,
+          width: 36,
+          height: 36,
+          child: Container(
+            decoration: const BoxDecoration(
+              color: Color(0xFF38BDF8),
+              shape: BoxShape.circle,
+              boxShadow: [BoxShadow(color: Colors.black45, blurRadius: 4)],
+            ),
+            child: const Icon(Icons.inventory_2_outlined, color: Colors.white, size: 18),
+          ),
+        ),
+      if (dropPoint != null)
+        Marker(
+          point: dropPoint,
+          width: 36,
+          height: 36,
+          child: Container(
+            decoration: const BoxDecoration(
+              color: Color(0xFFA78BFA),
+              shape: BoxShape.circle,
+              boxShadow: [BoxShadow(color: Colors.black45, blurRadius: 4)],
+            ),
+            child: const Icon(Icons.location_on_outlined, color: Colors.white, size: 18),
+          ),
+        ),
+    ];
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        height: 180,
+        decoration: BoxDecoration(
+          border: Border.all(color: _border),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Stack(
+          children: [
+            FlutterMap(
+              options: MapOptions(
+                initialCenter: center,
+                initialZoom: 13,
+                interactionOptions: const InteractionOptions(
+                  flags: InteractiveFlag.pinchZoom | InteractiveFlag.drag,
+                ),
+              ),
+              children: [
+                TileLayer(
+                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                  userAgentPackageName: 'com.example.sc_courier',
+                ),
+                if (pickupPoint != null && dropPoint != null)
+                  PolylineLayer(
+                    polylines: [
+                      Polyline(
+                        points: [pickupPoint, dropPoint],
+                        strokeWidth: 3,
+                        color: const Color(0xFF3B82F6),
+                        pattern: StrokePattern.dashed(segments: const [8, 8]),
+                      ),
+                    ],
+                  ),
+                MarkerLayer(markers: markers),
+              ],
+            ),
+            Positioned(
+              right: 8,
+              bottom: 8,
+              child: FilledButton.tonalIcon(
+                onPressed: onOpenMap,
+                icon: const Icon(Icons.fullscreen, size: 16),
+                label: const Text('Live Map', style: TextStyle(fontSize: 12)),
+                style: FilledButton.styleFrom(
+                  backgroundColor: Colors.black87,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  double? _asDouble(dynamic val) {
+    if (val == null) return null;
+    if (val is num) return val.toDouble();
+    if (val is String) return double.tryParse(val.trim());
+    return null;
+  }
 }
