@@ -2,4 +2,5 @@
 <resources>
     <!-- Brand orange, used to tint the status-bar notification icon. -->
     <color name="notification_accent">#F97316</color>
+    <color name="ic_launcher_background">#FFFFFF</color>
 </resources>
