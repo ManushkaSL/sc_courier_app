@@ -692,6 +692,7 @@ class SupabaseService {
 
     // 1. Fetch personal deliveries assigned to this rider
     if (uid != null || nic != null) {
+      List<dynamic>? pdRows;
       try {
         var query = _client.from('personal_delivery').select();
         if (uid != null && nic != null) {
@@ -701,16 +702,30 @@ class SupabaseService {
         } else if (nic != null) {
           query = query.eq('assigned_rider_nic', nic);
         }
+        pdRows = await query;
+      } catch (e) {
+        // Fallback: if assigned_rider_user_id column is not in table, query by nic only
+        if (nic != null) {
+          try {
+            pdRows = await _client
+                .from('personal_delivery')
+                .select()
+                .eq('assigned_rider_nic', nic);
+          } catch (e2) {
+            debugPrint('Could not fetch personal_delivery by nic: $e2');
+          }
+        } else {
+          debugPrint('Could not fetch personal_delivery: $e');
+        }
+      }
 
-        final List<dynamic> pdRows = await query;
+      if (pdRows != null) {
         for (final row in pdRows) {
           if (row is! Map) continue;
           final normalized = _normalizePersonalDelivery(Map<String, dynamic>.from(row));
           if (status != null && normalized['status'] != status) continue;
           deliveries.add(normalized);
         }
-      } catch (e) {
-        debugPrint('Could not fetch personal_delivery: $e');
       }
     }
 
@@ -910,41 +925,105 @@ class SupabaseService {
   }
 
   Future<void> updateDeliveryStatus(String deliveryId, String status) async {
-    // 1. If it's a personal delivery (e.g. numeric ID or PD-X)
     final numericId = int.tryParse(deliveryId.replaceAll(RegExp(r'[^0-9]'), ''));
-    if (numericId != null) {
-      String dbStatus = status;
-      if (status == 'accepted') {
-        dbStatus = 'Accepted';
-      } else if (status == 'picked_up') {
-        dbStatus = 'In Transit';
-      } else if (status == 'in_transit') {
-        dbStatus = 'In Transit';
-      } else if (status == 'completed') {
-        dbStatus = 'Delivered';
-      } else if (status == 'cancelled') {
-        dbStatus = 'Cancelled';
-      }
 
+    // Map status into standard casing
+    String pdStatus = status;
+    if (status == 'accepted') {
+      pdStatus = 'Accepted';
+    } else if (status == 'picked_up') {
+      pdStatus = 'In Transit';
+    } else if (status == 'in_transit') {
+      pdStatus = 'In Transit';
+    } else if (status == 'completed') {
+      pdStatus = 'Completed'; // 'Completed' matches Web Admin and Customer dashboards
+    } else if (status == 'cancelled') {
+      pdStatus = 'Cancelled';
+    }
+
+    // 1. If it's a personal delivery (e.g. numeric ID or PD-X)
+    if (numericId != null) {
       try {
         await _client
             .from('personal_delivery')
-            .update({'status': dbStatus})
+            .update({'status': pdStatus})
             .eq('pd_id', numericId);
       } catch (e) {
         debugPrint('Could not update personal_delivery status: $e');
       }
     }
 
-    // 2. Also attempt update on legacy delivery table
+    // 2. Also attempt update on legacy delivery table, syncing ATR and Trip
     try {
-      await _client
+      final dynamic updated = await _client
           .from(deliveryTable)
           .update({'delivery_status': status})
-          .eq('del_id', deliveryId);
+          .eq('del_id', numericId ?? deliveryId)
+          .select()
+          .maybeSingle();
+
+      if (updated is Map) {
+        final row = Map<String, dynamic>.from(updated);
+        final sourceType = row['source_type']?.toString().toLowerCase();
+        final sourceId = row['source_id'];
+        final tripId = row['trip_id'];
+
+        // If this delivery was created for an ATR request, keep ATR status in sync!
+        if (sourceType == 'atr' && sourceId != null) {
+          String atrStatus = 'Assigned';
+          if (status == 'accepted') {
+            atrStatus = 'Accepted';
+          } else if (status == 'picked_up' || status == 'in_transit') {
+            atrStatus = 'In Transit';
+          } else if (status == 'completed') {
+            atrStatus = 'Completed';
+          } else if (status == 'cancelled') {
+            atrStatus = 'Cancelled';
+          }
+
+          try {
+            await _client
+                .from('atr')
+                .update({'status': atrStatus})
+                .eq('atr_id', sourceId);
+          } catch (atrErr) {
+            debugPrint('Could not update atr status: $atrErr');
+          }
+        }
+
+        // If this delivery belongs to a trip, keep trip status in sync!
+        if (tripId != null) {
+          String tripStatus = status == 'completed'
+              ? 'completed'
+              : (status == 'cancelled' ? 'cancelled' : 'in_progress');
+          try {
+            await _client
+                .from(tripTable)
+                .update({'trip_status': tripStatus})
+                .eq('trip_id', tripId);
+          } catch (tripErr) {
+            debugPrint('Could not update trip status: $tripErr');
+          }
+        }
+      }
     } catch (error) {
       if (!_isMissingTable(error, deliveryTable)) {
         debugPrint('Could not update delivery table: $error');
+      }
+    }
+
+    // 3. When delivery is completed or cancelled, reset rider availability to Available
+    if (status == 'completed' || status == 'cancelled') {
+      try {
+        final user = await currentUserOrRestored();
+        if (user != null) {
+          await updateRiderAvailability(
+            riderId: user.id,
+            availability: RiderAvailability.available,
+          );
+        }
+      } catch (availErr) {
+        debugPrint('Could not reset rider availability: $availErr');
       }
     }
   }
